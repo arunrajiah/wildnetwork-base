@@ -41,6 +41,30 @@ def make_db(path: str) -> None:
     con.close()
 
 
+SAMPLE_YAML = (
+    "# BirdNET-Go configuration\n"
+    "main:\n"
+    "    name: BirdNET-Go\n"
+    "    latitude: 1.0 # not this one\n"
+    "birdnet:\n"
+    "    debug: false\n"
+    "    # latitude: 99.0 (commented out, must stay)\n"
+    "    sensitivity: 1\n"
+    "    rangefilter:\n"
+    "        latitude: 5.5\n"
+    "        threshold: 0.01\n"
+    "    latitude: 00.000  # set by the installer\r\n"
+    "    longitude: 00.000\n"
+    "    locale: en\n"
+    "realtime:\n"
+    "    weather:\n"
+    "        latitude: 7.0\n"
+    "        longitude: 8.0\n"
+)
+EXPECTED_YAML = (SAMPLE_YAML.replace("latitude: 00.000  # set", "latitude: 51.501234  # set")
+                 .replace("    longitude: 00.000\n", "    longitude: -0.141234\n"))
+
+
 class Server(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -55,6 +79,10 @@ class Server(unittest.TestCase):
             f"path = {db}\nstation_id = station1\nstate_file = {self.tmp}/state.json\n"
             "latitude = 42.36\nlongitude = -71.06\ncustom_key = keep me\n")
         self.calls = []
+        os.makedirs(f"{self.tmp}/config")
+        self.yaml = f"{self.tmp}/config/config.yaml"
+        Path(self.yaml).write_bytes(SAMPLE_YAML.encode())
+        os.chmod(self.yaml, 0o640)
         cfg = wnbase.Config(None, agent_config=self.ini, agent_module=AGENT,
                             setup_code_file=f"{self.tmp}/wnbase/setup-code")
         self.app = wnbase.App(cfg, runner=self.fake_run)
@@ -68,6 +96,8 @@ class Server(unittest.TestCase):
 
     def fake_run(self, args, timeout=30):
         self.calls.append(args)
+        if args[:2] == ["docker", "restart"]:
+            return 0, ""
         return 127, ""  # nmcli, mmcli, docker and systemctl are absent in tests
 
     def req(self, method, path, body=None, code=None):
@@ -119,6 +149,27 @@ class Server(unittest.TestCase):
         st, info, _ = self.req("GET", "/api/info")
         self.assertEqual((info["name"], info["deviceId"]), ("Hill top", "wnb_1"))
         self.assertNotIn("wn_new_key", json.dumps(info))
+
+    def test_location_goes_into_birdnet_go_config(self):
+        st, res, _ = self.req("POST", "/api/config", {"latitude": 51.501234, "longitude": -0.141234, "roundCoords": 2},
+                              code=self.app.setup_code)
+        self.assertEqual(st, 200, res)
+        self.assertNotIn("notes", res)
+        self.assertEqual(Path(self.yaml).read_bytes(), EXPECTED_YAML.encode())  # exact, only two lines changed
+        self.assertEqual(os.stat(self.yaml).st_mode & 0o777, 0o640)
+        self.assertIn(["docker", "restart", "birdnet-go"], self.calls)
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.ini)
+        self.assertEqual(cp["agent"]["latitude"], "51.501234")  # wdx-agent rounds when sending, not here
+
+    def test_missing_birdnet_go_config_is_a_note(self):
+        os.remove(self.yaml)
+        st, res, _ = self.req("POST", "/api/config", {"latitude": 10, "longitude": 20}, code=self.app.setup_code)
+        self.assertEqual(st, 200, res)
+        self.assertIn("BirdNET-Go config not found", res["notes"][0])
+        self.assertNotIn(["docker", "restart", "birdnet-go"], self.calls)
+        st, res, _ = self.req("POST", "/api/config", {"name": "x"}, code=self.app.setup_code)
+        self.assertNotIn("notes", res)
 
     def test_config_rejects_bad_values(self):
         st, _, _ = self.req("POST", "/api/config", {"latitude": 123}, code=self.app.setup_code)

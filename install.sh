@@ -69,7 +69,7 @@ else
   curl -fsSL https://github.com/tphakala/birdnet-go/raw/main/install.sh -o "$bng/install.sh"
   chown -R "$RUN_USER" "$bng"
   # The installer refuses to run as root and uses sudo itself; --silent takes settings from BIRDNET_* variables.
-  # Location is set later through the Base setup and BirdNET-Go's own web page (port 8080).
+  # The location is written into its config.yaml later, when it is entered in the Base setup.
   (cd "$bng" && sudo -u "$RUN_USER" -H env BIRDNET_TELEMETRY=false bash ./install.sh -v "${WN_BIRDNET_VERSION:-latest}" --silent)
   rm -rf "$bng"
 fi
@@ -110,6 +110,9 @@ agent_service = wdx-agent
 # Empty: the path in /etc/wdx-agent.ini
 birdnet_db =
 clips_dir = $CLIPS_DIR
+# BirdNET-Go settings; wnbase writes the station location here so its species range filter is right
+birdnet_config = $RUN_HOME/birdnet-go-app/config/config.yaml
+birdnet_container = birdnet-go
 setup_code_file = /etc/wnbase/setup-code
 
 [hotspot]

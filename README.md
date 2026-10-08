@@ -28,8 +28,6 @@ The installer:
 
 It is safe to run again: configs, the setup code and BirdNET-Go are kept. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
 
-Set the station location in BirdNET-Go too (its web page is on port 8080), so it can filter species by range.
-
 ## First-time setup
 
 Each Base has its own hotspot and setup code. The label on the device shows:
@@ -81,13 +79,13 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
  "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}}
 ```
 
-Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. `apn` creates or updates the NetworkManager connection `wn-4g`; `wifi` saves the connection `wn-uplink`, which is used the next time the radio is free. Response:
+Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new `latitude`/`longitude` is also written, unrounded, into BirdNET-Go's `config.yaml` (only the `latitude` and `longitude` keys directly under `birdnet:` change; the rest of the file is kept as it was), and the `birdnet-go` container is restarted, so BirdNET-Go's species range filter uses the real location. At 0,0 it would accept species that do not occur there. The exact location stays on the device; `roundCoords` only applies to what wdx-agent uploads. `apn` creates or updates the NetworkManager connection `wn-4g`; `wifi` saves the connection `wn-uplink`, which is used the next time the radio is free. Response:
 
 ```json
 {"ok": true, "configured": true}
 ```
 
-A `warnings` list is added when, for example, no modem is present. Wrong code: `403`. After 10 wrong codes in 10 minutes from one address: `429`. Bad values: `400`.
+A `warnings` list is added when, for example, no modem is present, and a `notes` list when BirdNET-Go could not be updated (for example `config.yaml` not found: then set the location in BirdNET-Go's web page on port 8080). Wrong code: `403`. After 10 wrong codes in 10 minutes from one address: `429`. Bad values: `400`.
 
 ### GET /api/status
 
@@ -164,6 +162,9 @@ agent_service = wdx-agent
 # empty: the path in /etc/wdx-agent.ini
 birdnet_db =
 clips_dir = /home/pi/birdnet-go-app/data/clips
+# empty: ../config/config.yaml from the database folder
+birdnet_config = /home/pi/birdnet-go-app/config/config.yaml
+birdnet_container = birdnet-go
 setup_code_file = /etc/wnbase/setup-code
 
 [hotspot]

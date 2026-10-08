@@ -17,6 +17,7 @@ import configparser
 import hashlib
 import hmac
 import importlib.util
+import io
 import json
 import os
 import re
@@ -75,6 +76,8 @@ class Config:
         self.agent_service = g(w, "agent_service", "wdx-agent")
         self.birdnet_db = g(w, "birdnet_db", "")      # empty: the `path` in the wdx-agent config
         self.clips_dir = g(w, "clips_dir", "")        # empty: "clips" next to the database
+        self.birdnet_config = g(w, "birdnet_config", "")  # empty: ../config/config.yaml from the database folder
+        self.birdnet_container = g(w, "birdnet_container", "birdnet-go")
         self.setup_code_file = g(w, "setup_code_file", "/etc/wnbase/setup-code")
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "WildNetwork-")
@@ -155,23 +158,16 @@ def nmcli_fields(line: str) -> list[str]:
     return [p.replace("\\:", ":").replace("\\\\", "\\") for p in re.split(r"(?<!\\):", line)]
 
 
-def write_ini(path: str, section: str, updates: dict[str, str]) -> None:
-    """Change some keys of an ini file atomically, keeping every other key, the file mode and the owner."""
-    cp = configparser.ConfigParser(interpolation=None)
-    cp.optionxform = str
-    cp.read(path)
-    if not cp.has_section(section):
-        cp.add_section(section)
-    for k, v in updates.items():
-        cp[section][k] = v
+def write_atomic(path: str, data: bytes, new_mode: int = 0o640) -> None:
+    """Replace a file atomically, keeping its mode and owner (new files get new_mode)."""
     try:
         st = os.stat(path)
     except FileNotFoundError:
         st = None
     tmp = f"{path}.wnbase-tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        cp.write(f)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
         f.flush()
         os.fsync(f.fileno())
     if st is not None:
@@ -181,8 +177,54 @@ def write_ini(path: str, section: str, updates: dict[str, str]) -> None:
             pass
         os.chmod(tmp, st.st_mode & 0o777)
     else:
-        os.chmod(tmp, 0o640)
+        os.chmod(tmp, new_mode)
     os.replace(tmp, path)
+
+
+def write_ini(path: str, section: str, updates: dict[str, str]) -> None:
+    """Change some keys of an ini file atomically, keeping every other key, the file mode and the owner."""
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    cp.read(path)
+    if not cp.has_section(section):
+        cp.add_section(section)
+    for k, v in updates.items():
+        cp[section][k] = v
+    buf = io.StringIO()
+    cp.write(buf)
+    write_atomic(path, buf.getvalue().encode())
+
+
+def set_yaml_keys(text: str, section: str, values: dict[str, str]) -> tuple[str, set[str]]:
+    """Set scalar keys directly under a top-level YAML mapping, editing only those lines.
+
+    No YAML library: finds the line `section:` at column 0, takes the following indented lines as its body, and
+    rewrites `key: value` lines at the body's own indent (not deeper), keeping indentation, any trailing comment
+    and the line ending. Everything else is left byte for byte. Returns (new text, keys that were found)."""
+    lines = text.splitlines(keepends=True)
+    head = re.compile(rf"{re.escape(section)}:[ \t]*(#.*)?\r?\n?")
+    found: set[str] = set()
+    i = next((n for n, line in enumerate(lines) if head.fullmatch(line)), None)
+    if i is None:
+        return text, found
+    indent = None
+    for n in range(i + 1, len(lines)):
+        line = lines[n]
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            continue
+        lead = line[:len(line) - len(line.lstrip(" \t"))]
+        if not lead:
+            break  # next top-level key: the section ended
+        if indent is None:
+            indent = lead
+        if lead != indent:
+            continue  # nested deeper (or odd indentation): not a direct key of this section
+        m = re.fullmatch(r"([ \t]*)([A-Za-z0-9_]+)([ \t]*:[ \t]*)([^#\r\n]*?)([ \t]+#[^\r\n]*)?(\r?\n?)", line)
+        if m and m.group(2) in values and m.group(2) not in found:
+            lines[n] = m.group(1) + m.group(2) + m.group(3) + values[m.group(2)] + (m.group(5) or "") + m.group(6)
+            found.add(m.group(2))
+    return "".join(lines), found
 
 
 def canon(cursor) -> str:
@@ -230,6 +272,37 @@ class App:
 
     def db_path(self, s) -> str:
         return self.cfg.birdnet_db or s.path
+
+    def birdnet_config(self, s) -> str:
+        return self.cfg.birdnet_config or os.path.join(os.path.dirname(os.path.dirname(self.db_path(s))),
+                                                        "config", "config.yaml")
+
+    def set_birdnet_location(self, lat: float | None, lon: float | None) -> list[str]:
+        """Give BirdNET-Go the exact location so its range filter works. Unrounded: this stays on the device."""
+        try:
+            path = self.birdnet_config(self.settings())
+        except ApiError as e:
+            return [f"BirdNET-Go location not set: {e.msg}"]
+        values = {k: repr(v) for k, v in (("latitude", lat), ("longitude", lon)) if v is not None}
+        try:
+            raw = Path(path).read_bytes()
+        except FileNotFoundError:
+            return [f"BirdNET-Go config not found at {path}; set the location in BirdNET-Go yourself"]
+        except OSError as e:
+            return [f"BirdNET-Go config not readable: {e}"]
+        text = raw.decode("utf-8", "surrogateescape")
+        new, found = set_yaml_keys(text, "birdnet", values)
+        notes = []
+        missing = set(values) - found
+        if missing:
+            notes.append(f"BirdNET-Go config has no {' or '.join(sorted(missing))} under birdnet:; set it in BirdNET-Go")
+        if new != text:
+            write_atomic(path, new.encode("utf-8", "surrogateescape"))
+            log(f"BirdNET-Go location updated in {path}")
+            rc, out = self.run(["docker", "restart", self.cfg.birdnet_container], 120)
+            if rc != 0:
+                notes.append(f"BirdNET-Go not restarted: {out.strip()[:200] or 'docker not available'}")
+        return notes
 
     def clips_dir(self, s) -> str:
         return self.cfg.clips_dir or os.path.join(os.path.dirname(self.db_path(s)), "clips")
@@ -295,6 +368,7 @@ class App:
 
         if "name" in body:
             updates["station_name"] = text("name", r"[^\x00-\x1f\x7f]*", 64).strip()
+        lat_lon: dict[str, float] = {}
         for key, lim in (("latitude", 90), ("longitude", 180)):
             if key in body:
                 v = body[key]
@@ -305,6 +379,7 @@ class App:
                 if isinstance(v, bool) or not -lim <= f <= lim:
                     raise ApiError(400, f"invalid {key}")
                 updates[key] = repr(f)
+                lat_lon[key] = f
         if "roundCoords" in body:
             v = body["roundCoords"]
             if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 5:
@@ -333,6 +408,9 @@ class App:
             warnings += self.set_apn(apn)
         if wifi is not None:
             warnings += self.set_wifi(wifi["ssid"], wifi["psk"])
+        notes: list[str] = []
+        if "latitude" in updates or "longitude" in updates:
+            notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"))
         if updates:
             rc, out = self.run(["systemctl", "restart", self.cfg.agent_service], 60)
             if rc != 0:
@@ -344,6 +422,8 @@ class App:
         res = {"ok": True, "configured": configured}
         if warnings:
             res["warnings"] = warnings
+        if notes:
+            res["notes"] = notes
         return res
 
     def connection_exists(self, name: str) -> bool:

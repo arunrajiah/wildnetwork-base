@@ -7,11 +7,10 @@ Wants=NetworkManager.service
 ExecStart=/usr/bin/python3 /opt/wnbase/wnbase.py --config /etc/wnbase/wnbase.ini
 Restart=always
 RestartSec=5
-# Root: binds port 80, writes /etc/wdx-agent.ini, runs nmcli and systemctl.
+# Root: binds port 80, writes /etc/wdx-agent.ini and BirdNET-Go's config.yaml, runs nmcli, systemctl and docker.
 User=root
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=read-only
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
