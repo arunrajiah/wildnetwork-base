@@ -16,47 +16,47 @@ There are three ways to build one. Pick the row that matches where the Base will
 
 ### Every build
 
-| Part | What to look for | Approx. cost (INR) |
+| Part | What to look for | Approx. cost |
 |---|---|---|
-| Raspberry Pi 4 Model B (2 GB or more) or Raspberry Pi 5 | Buy from an official reseller. The Pi 4 uses less power, which matters for solar. | 4,500 to 7,500 |
-| microSD card, 32 GB or larger | A known brand, "A1" or "A2" rated. Cheap cards fail after months of constant writing. | 400 to 800 |
-| USB microphone | See [Choosing a microphone](#choosing-a-microphone). | 1,000 to 4,000 |
-| Power supply | Pi 4: official 5.1 V 3 A USB-C. Pi 5: official 5.1 V 5 A (27 W) USB-C. Phone chargers often cause random restarts. | 700 to 1,200 |
-| Case or heatsink for the Pi | A case with a fan, or a large aluminium heatsink case. It keeps the Pi cool in summer. | 500 to 1,200 |
+| Raspberry Pi 4 Model B (2 GB or more) or Raspberry Pi 5 | Buy from an official reseller. The Pi 4 uses less power, which matters for solar. | ₹4,500 to 7,500 (US$50 to 85) |
+| microSD card, 32 GB or larger | A known brand, "A1" or "A2" rated. Cheap cards fail after months of constant writing. | ₹400 to 800 (US$5 to 9) |
+| USB microphone | See [Choosing a microphone](#choosing-a-microphone). | ₹1,000 to 4,000 (US$11 to 45) |
+| Power supply | Pi 4: official 5.1 V 3 A USB-C. Pi 5: official 5.1 V 5 A (27 W) USB-C. Phone chargers often cause random restarts. | ₹700 to 1,200 (US$8 to 14) |
+| Case or heatsink for the Pi | A case with a fan, or a large aluminium heatsink case. It keeps the Pi cool in summer. | ₹500 to 1,200 (US$6 to 14) |
 | Computer with an SD card reader | To flash the card once. Any Windows, macOS or Linux computer. | (you have it) |
 
 ### Add for outdoor builds (B and C)
 
-| Part | What to look for | Approx. cost (INR) |
+| Part | What to look for | Approx. cost |
 |---|---|---|
-| Weatherproof enclosure | IP65 or better ABS junction box, light coloured, about 200 × 150 × 100 mm or larger. | 600 to 1,500 |
-| Cable glands | PG7 or PG9 nylon glands, one per cable that goes through the box. | 100 to 300 |
-| Breather vent | A small vent plug (often sold as "Gore vent" or "IP68 breather"). Stops condensation building up inside. | 150 to 400 |
-| Silica gel packs | A few sachets inside the box, replaced at each visit. | 50 |
-| Microphone shield | A short length of PVC pipe or a small plastic cup to keep rain off the microphone, and a foam windscreen. | 100 to 300 |
-| Mounting | Pole clamps, a bracket or stainless steel cable ties. | 200 to 600 |
+| Weatherproof enclosure | IP65 or better ABS junction box, light coloured, about 200 × 150 × 100 mm or larger. | ₹600 to 1,500 (US$7 to 17) |
+| Cable glands | PG7 or PG9 nylon glands, one per cable that goes through the box. | ₹100 to 300 (US$1 to 3) |
+| Breather vent | A small vent plug (often sold as "Gore vent" or "IP68 breather"). Stops condensation building up inside. | ₹150 to 400 (US$2 to 5) |
+| Silica gel packs | A few sachets inside the box, replaced at each visit. | ₹50 (US$1) |
+| Microphone shield | A short length of PVC pipe or a small plastic cup to keep rain off the microphone, and a foam windscreen. | ₹100 to 300 (US$1 to 3) |
+| Mounting | Pole clamps, a bracket or stainless steel cable ties. | ₹200 to 600 (US$2 to 7) |
 
 ### Add for 4G (B or C without Wi-Fi)
 
-| Part | What to look for | Approx. cost (INR) |
+| Part | What to look for | Approx. cost |
 |---|---|---|
-| USB 4G modem | Easiest: a "HiLink" USB dongle (for example Huawei E3372h); it appears to the Pi as a network cable and needs no setup on the Base. Alternative: a Quectel EC25 USB modem, which the Base sets up with your SIM's APN. | 2,000 to 4,000 |
+| USB 4G modem | Easiest: a "HiLink" USB dongle (for example Huawei E3372h); it appears to the Pi as a network cable and needs no setup on the Base. Alternative: a Quectel EC25 USB modem, which the Base sets up with your SIM's APN. | ₹2,000 to 4,000 (US$25 to 45) |
 | Data SIM | Any operator with coverage at the site. A Base sends only a few kilobytes a day, so the smallest data plan is enough. | Plan dependent |
 
 ### Add for solar (C)
 
 A Pi 4 running BirdNET-Go draws about 3 to 5 W around the clock, which is roughly 100 Wh a day. Size the system for the cloudiest week of the year, not for a sunny day.
 
-| Part | What to look for | Approx. cost (INR) |
+| Part | What to look for | Approx. cost |
 |---|---|---|
-| Solar panel | 50 W, 12 V, monocrystalline. 30 W can work in sunny months but often runs out during the monsoon. | 2,000 to 3,500 |
-| Battery | 12 V LiFePO4, 20 Ah (about 256 Wh, two to three days without sun). Avoid ordinary lead acid in hot places. | 5,000 to 8,000 |
-| Solar charge controller | 10 A, with a LiFePO4 setting. MPPT is better than PWM but costs more. | 800 to 3,000 |
-| 12 V to 5 V converter | A step-down (buck) converter with a USB-C output: 5 V 3 A for a Pi 4, 5 V 5 A for a Pi 5. | 400 to 900 |
-| Fuse and holder | An inline 5 A fuse on the battery's positive wire. | 100 |
-| Wire | 1.5 mm² (or 16 AWG) red and black, with ring terminals for the battery. | 200 |
+| Solar panel | 50 W, 12 V, monocrystalline. 30 W can work in sunny months but often runs out during the monsoon. | ₹2,000 to 3,500 (US$25 to 40) |
+| Battery | 12 V LiFePO4, 20 Ah (about 256 Wh, two to three days without sun). Avoid ordinary lead acid in hot places. | ₹5,000 to 8,000 (US$55 to 90) |
+| Solar charge controller | 10 A, with a LiFePO4 setting. MPPT is better than PWM but costs more. | ₹800 to 3,000 (US$9 to 35) |
+| 12 V to 5 V converter | A step-down (buck) converter with a USB-C output: 5 V 3 A for a Pi 4, 5 V 5 A for a Pi 5. | ₹400 to 900 (US$5 to 10) |
+| Fuse and holder | An inline 5 A fuse on the battery's positive wire. | ₹100 (US$1) |
+| Wire | 1.5 mm² (or 16 AWG) red and black, with ring terminals for the battery. | ₹200 (US$2) |
 
-Prices are rough estimates from Indian retail listings in 2026, not quotes. A complete solar Base costs roughly ₹15,000 to ₹25,000 depending on the parts you choose.
+Prices are rough estimates from Indian retail listings in 2026, not quotes; US dollar figures are converted at about ₹88 to US$1 and rounded, and prices outside India will differ. A complete solar Base costs roughly ₹15,000 to ₹25,000 (US$170 to 285) depending on the parts you choose.
 
 ### Choosing a microphone
 
