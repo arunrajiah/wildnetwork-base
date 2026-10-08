@@ -180,7 +180,7 @@ class Server(unittest.TestCase):
         self.assertTrue(r.getheader("content-type").startswith("text/html"))
         self.assertIn(b"WildNetwork Base", data)
         self.assertNotIn(b"http://", data.replace(b"http://10.42.0.1", b""))  # nothing loaded from elsewhere
-        self.assertNotIn("—".encode(), data)
+        self.assertNotIn("\u2014".encode(), data)
 
     def test_unknown_path(self):
         self.assertEqual(self.req("GET", "/api/nope")[0], 404)
