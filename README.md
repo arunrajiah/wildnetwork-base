@@ -14,7 +14,7 @@
 
 What runs on it: **BirdNET-Go** identifies species from the microphone, **wdx-agent** sends the detections to WildNetwork over 4G, Wi-Fi or Ethernet, and **wnbase** (this repository) serves the dashboard and setup page over the Base's own Wi-Fi.
 
-Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. The parts list and enclosure are in the hardware docs (to come).
+Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. [Build a Base: parts and step-by-step guide](docs/HARDWARE.md).
 
 > Part of an open wildlife toolkit. Not sure this is the project you need? See [which project to use](#part-of-an-open-wildlife-toolkit).
 
@@ -44,7 +44,13 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 **With the WildNetwork field app:** join the hotspot, open the app and follow the steps. The app reads `/api/info` and sends your location, key and connection details to `/api/config`.
 
-**With a browser:** join the hotspot, open http://10.42.0.1, open **Setup**, enter the setup code, the station name and location, and either a WildNetwork API key (for a Base that uploads on its own over 4G or Wi-Fi) or a device id. Add the APN of your SIM for 4G, or a Wi-Fi network for a Base near a router.
+**With a browser:** join the hotspot, open http://10.42.0.1 and open **Setup**. Enter:
+
+1. the setup code from the label;
+2. a name for the station and its location (type the coordinates, or tap **Use this phone's location**; some phone browsers only share the location on secure pages, so typing always works);
+3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out.
+
+That is all. The Base then connects to WildNetwork by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to WildNetwork", or "Will connect to WildNetwork when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
 The hotspot runs whenever the Wi-Fi radio is not connected to a network. When the Base joins a Wi-Fi network (the one set during setup, or one set when the SD card was flashed) the hotspot stops, and the dashboard is at `http://<hostname>.local` on that network. To keep the hotspot on regardless, set `force = yes` under `[hotspot]` in `/etc/wnbase/wnbase.ini`.
 
@@ -63,7 +69,7 @@ If a step fails, nothing is lost: the same batch is offered again. WildNetwork d
 
 - The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
-- The WildNetwork API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint.
+- The WildNetwork API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 
@@ -110,10 +116,13 @@ No code needed.
 ```json
 {"hardwareId": "10000000abcd1234", "model": "wildnetwork-base", "hostname": "wnbase",
  "software": {"wnbase": "0.1.0", "wdx-agent": "0.3.0", "birdnetGo": "latest"},
- "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12}
+ "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
+ "registration": "registered"}
 ```
 
-`configured` is true once a location and either an API key or a device id are set. `birdnetGo` is the BirdNET-Go image tag, or null.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned.
+
+**Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
 #### POST /api/config
 

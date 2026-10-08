@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -249,6 +250,100 @@ class Server(unittest.TestCase):
 
     def test_unknown_path(self):
         self.assertEqual(self.req("GET", "/api/nope")[0], 404)
+
+
+class Registration(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        make_db(f"{self.tmp}/birdnet.db")
+        self.ini = f"{self.tmp}/wdx-agent.ini"
+        self.write_ini("api_key =\nstation_name = Hill top\nlatitude = 51.5\nlongitude = -0.12\n")
+        self.posts, self.calls, self.reply = [], [], (201, {
+            "deviceId": "wnb_abc", "apiKey": "wn_SECRET_KEY_123", "source": "wildnetwork-base",
+            "eventsEndpoint": "https://example.org/api/v1/events", "statusEndpoint": "https://example.org/api/v1/devices/status"})
+        cfg = wnbase.Config(None, agent_config=self.ini, agent_module=AGENT, setup_code_file=f"{self.tmp}/setup-code")
+        self.app = wnbase.App(cfg, runner=self.fake_run, http_post=self.fake_post)
+
+    def write_ini(self, extra):
+        Path(self.ini).write_text(
+            "[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\n"
+            f"path = {self.tmp}/birdnet.db\nstation_id = station1\nstate_file = {self.tmp}/state.json\n{extra}")
+
+    def fake_run(self, args, timeout=30):
+        self.calls.append(args)
+        return 0, ""
+
+    def fake_post(self, url, body, timeout=30):
+        self.posts.append((url, body))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+    def agent_ini(self):
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.ini)
+        return cp["agent"]
+
+    def run_logged(self, fn):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            res = fn()
+        return res, out.getvalue()
+
+    def test_registers_once_and_writes_the_ini(self):
+        wait, logs = self.run_logged(self.app.register_once)
+        self.assertEqual(self.posts, [("https://example.org/api/v1/devices",
+                                       {"name": "Hill top", "model": "wildnetwork-base", "hardwareId": self.app.hw})])
+        a = self.agent_ini()
+        self.assertEqual((a["api_key"], a["device_id"], a["system"]), ("wn_SECRET_KEY_123", "wnb_abc", "wildnetwork-base"))
+        self.assertEqual((a["station_name"], a["latitude"]), ("Hill top", "51.5"))  # other keys kept
+        self.assertIn(["systemctl", "restart", "wdx-agent"], self.calls)
+        info = self.app.info()
+        self.assertEqual((info["registration"], info["deviceId"]), ("registered", "wnb_abc"))
+        self.assertNotIn("wn_SECRET_KEY_123", logs + json.dumps(info))
+        self.assertEqual(wait, wnbase.REGISTER_EVERY)
+        self.run_logged(self.app.register_once)
+        self.assertEqual(len(self.posts), 1)  # a key now exists: never again
+
+    def test_existing_key_from_the_field_app_is_kept(self):
+        self.write_ini("api_key = wn_from_app\nstation_name = Hill top\nlatitude = 51.5\nlongitude = -0.12\n")
+        self.run_logged(self.app.register_once)
+        self.assertEqual((self.posts, self.agent_ini()["api_key"]), ([], "wn_from_app"))
+        self.assertEqual(self.app.info()["registration"], "registered")
+
+    def test_waits_for_name_and_location(self):
+        self.write_ini("api_key =\nstation_name = Hill top\n")
+        self.run_logged(self.app.register_once)
+        self.write_ini("api_key =\nstation_name =\nlatitude = 51.5\nlongitude = -0.12\n")
+        self.run_logged(self.app.register_once)
+        self.assertEqual(self.posts, [])
+        self.assertEqual(self.app.info()["registration"], "waiting-for-setup")
+
+    def test_network_errors_back_off_to_an_hour(self):
+        self.reply = urllib.error.URLError("no route")
+        waits = [self.run_logged(self.app.register_once)[0] for _ in range(6)]
+        self.assertEqual(waits, [300, 600, 1200, 2400, 3600, 3600])
+        self.assertEqual(self.app.info()["registration"], "waiting-for-internet")
+        self.assertEqual(self.agent_ini()["api_key"], "")
+        self.reply = TimeoutError()
+        self.run_logged(self.app.register_once)
+        self.assertEqual(self.app.info()["registration"], "waiting-for-internet")
+
+    def test_rate_limit_waits_an_hour(self):
+        self.reply = (429, {"error": "too many registrations from this address today"})
+        wait, logs = self.run_logged(self.app.register_once)
+        self.assertEqual(wait, 3600)
+        self.assertTrue(self.app.info()["registration"].startswith("error: "))
+        self.assertIn("5 new devices", logs)
+        self.assertEqual(self.agent_ini()["api_key"], "")
+
+    def test_refusal_is_reported_without_writing(self):
+        self.reply = (400, {"error": "name must be at least 3 characters"})
+        self.run_logged(self.app.register_once)
+        self.assertEqual(self.app.info()["registration"], "error: name must be at least 3 characters")
+        self.assertNotIn("device_id", self.agent_ini())
 
 
 if __name__ == "__main__":

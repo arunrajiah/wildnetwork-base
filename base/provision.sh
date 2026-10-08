@@ -65,8 +65,7 @@ system = wildnetwork-base
 sensor_model = WildNetwork Base
 path = $APP_DIR/data/birdnet.db
 station_name = $NAME
-latitude =
-longitude =
+# latitude and longitude are added by the Base setup (wdx-agent cannot read them empty)
 round_coords = 2
 min_confidence = 0.7
 interval_seconds = 60

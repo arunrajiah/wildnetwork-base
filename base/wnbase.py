@@ -30,6 +30,8 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +45,8 @@ FAIL_LIMIT = 10        # wrong setup codes allowed per client address ...
 FAIL_WINDOW = 600      # ... in this many seconds
 MAX_BODY = 64 * 1024
 RECENT_MAX = 200
+REGISTER_EVERY = 300        # seconds between registration checks
+REGISTER_MAX_BACKOFF = 3600
 AUDIO_TYPES = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac", ".aac": "audio/aac",
                ".m4a": "audio/mp4", ".opus": "audio/ogg", ".ogg": "audio/ogg"}
 
@@ -228,6 +232,22 @@ def set_yaml_keys(text: str, section: str, values: dict[str, str]) -> tuple[str,
     return "".join(lines), found
 
 
+def http_post_json(url: str, body: dict, timeout: int = 30) -> tuple[int, dict]:
+    """POST JSON, return (status, JSON body or {}). Network problems raise OSError (URLError is one)."""
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
+        "content-type": "application/json", "user-agent": f"wnbase/{VERSION}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, raw = e.code, e.read()
+    try:
+        data = json.loads(raw or b"{}")
+    except ValueError:
+        data = {}
+    return status, data if isinstance(data, dict) else {}
+
+
 def canon(cursor) -> str:
     return json.dumps(cursor, sort_keys=True, separators=(",", ":"))
 
@@ -250,8 +270,12 @@ def open_ro(path: str) -> sqlite3.Connection:
 
 
 class App:
-    def __init__(self, cfg: Config, runner=None, agent=None):
+    def __init__(self, cfg: Config, runner=None, agent=None, http_post=None):
         self.cfg = cfg
+        self.http_post = http_post or http_post_json
+        self.registration = "waiting-for-setup"
+        self.reg_backoff = REGISTER_EVERY
+        self.reg_wake = threading.Event()
         self.agent = agent or load_agent(cfg.agent_module)
         self.run = runner or run_command
         self.setup_code, created = ensure_setup_code(cfg.setup_code_file)
@@ -270,6 +294,8 @@ class App:
             return self.agent.Settings(self.cfg.agent_config)
         except SystemExit as e:
             raise ApiError(503, f"wdx-agent config: {e}")
+        except ValueError as e:  # e.g. "latitude =" left empty: wdx-agent cannot parse it
+            raise ApiError(503, f"wdx-agent config has a value it cannot read: {e}")
 
     def db_path(self, s) -> str:
         return self.cfg.birdnet_db or s.path
@@ -323,7 +349,8 @@ class App:
 
     @staticmethod
     def configured(s) -> bool:
-        return bool(s and s.latitude is not None and s.longitude is not None and (s.api_key or s.device_id))
+        # Set up = the Base knows where it is. The key comes by itself (registration) or from the field app.
+        return bool(s and s.latitude is not None and s.longitude is not None)
 
     def birdnet_go_version(self) -> str | None:
         if self._bng and time.monotonic() - self._bng[0] < 600:
@@ -352,7 +379,70 @@ class App:
             "name": (s.station_name or None) if s else None,
             "latitude": s.latitude if s else None,
             "longitude": s.longitude if s else None,
+            "registration": "registered" if s and s.api_key else self.registration,
         }
+
+    # --- registration with WildNetwork -------------------------------------------------------------------
+
+    def register_once(self) -> int:
+        """One registration attempt when the Base is set up but has no key. Returns seconds until the next check."""
+        try:
+            s = self.settings()
+        except ApiError:
+            self.registration = "error: wdx-agent config missing"
+            return REGISTER_EVERY
+        if s.api_key:  # registered earlier, or the field app wrote a key: nothing to do
+            self.registration, self.reg_backoff = "registered", REGISTER_EVERY
+            return REGISTER_EVERY
+        if len(s.station_name.strip()) < 3 or s.latitude is None or s.longitude is None:
+            self.registration, self.reg_backoff = "waiting-for-setup", REGISTER_EVERY
+            return REGISTER_EVERY
+        url = s.endpoint.rsplit("/events", 1)[0] + "/devices"
+        body = {"name": s.station_name.strip(), "model": "wildnetwork-base", "hardwareId": self.hw}
+        try:
+            status, res = self.http_post(url, body, 30)
+        except (OSError, ValueError) as e:  # URLError, timeouts, DNS: most likely no internet yet
+            self.registration = "waiting-for-internet"
+            log(f"registration: WildNetwork not reachable ({type(e).__name__}); retrying in {self.reg_backoff}s")
+            return self._backoff()
+        if status == 429:
+            self.registration = "error: too many new devices from this network today"
+            log("registration: WildNetwork allows 5 new devices per network per day; retrying in an hour")
+            return REGISTER_MAX_BACKOFF
+        key, device = res.get("apiKey"), res.get("deviceId")
+        if status not in (200, 201) or not isinstance(key, str) or not key or not isinstance(device, str):
+            reason = str(res.get("error") or f"HTTP {status}")[:80]
+            self.registration = f"error: {reason}"
+            log(f"registration refused: {reason}; retrying in {self.reg_backoff}s")
+            return self._backoff()
+        with self.lock:
+            if self.settings().api_key:  # a key arrived from the field app meanwhile: keep it
+                self.registration = "registered"
+                return REGISTER_EVERY
+            write_ini(self.cfg.agent_config, "agent", {"api_key": key, "device_id": device, "system": "wildnetwork-base"})
+        log(f"registered with WildNetwork as device {device}")
+        rc, out = self.run(["systemctl", "restart", self.cfg.agent_service], 60)
+        if rc != 0:
+            log(f"could not restart {self.cfg.agent_service}: {out.strip()[:200]}")
+        self.registration, self.reg_backoff = "registered", REGISTER_EVERY
+        return REGISTER_EVERY
+
+    def _backoff(self) -> int:
+        wait = self.reg_backoff
+        self.reg_backoff = min(self.reg_backoff * 2, REGISTER_MAX_BACKOFF)
+        return wait
+
+    def start_registration(self) -> None:
+        def loop():
+            while True:
+                try:
+                    wait = self.register_once()
+                except Exception:
+                    log(f"registration error:\n{traceback.format_exc()}")
+                    wait = REGISTER_MAX_BACKOFF
+                self.reg_wake.wait(wait)
+                self.reg_wake.clear()
+        threading.Thread(target=loop, name="registration", daemon=True).start()
 
     def configure(self, body: dict) -> dict:
         allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi"}
@@ -419,6 +509,8 @@ class App:
             rc, out = self.run(["systemctl", "restart", self.cfg.agent_service], 60)
             if rc != 0:
                 warnings.append(f"could not restart {self.cfg.agent_service}: {out.strip()[:200]}")
+            self.reg_backoff = REGISTER_EVERY
+            self.reg_wake.set()  # try to register right away with the new name and location
         try:
             configured = self.configured(self.settings())
         except ApiError:
@@ -661,25 +753,33 @@ details{background:var(--card);border:1px solid var(--line);border-radius:10px;p
 summary{cursor:pointer;font-weight:600}label{display:block;margin-top:10px;font-size:.85rem;color:var(--dim)}
 input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:4px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.msg{margin-top:10px;font-size:.9rem}.err{color:var(--bad)}.okc{color:var(--accent)}
-.empty{color:var(--dim);padding:14px 4px}
+.empty{color:var(--dim);padding:14px 4px}h3{font-size:.95rem;margin:18px 0 0}details.adv{background:none;border:0;padding:0;margin-top:14px}
+.reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}
 </style></head><body><main>
 <header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">WildNetwork Base</h1><span id="dot" class="dot" title="Health"></span></header>
 <div class="sub" id="hw"></div>
+<p class="reg" id="reg"></p>
 <h2>Health</h2>
 <div class="grid" id="health"></div>
 <div class="msg err" id="err"></div>
 <h2>Last 24 hours</h2>
 <ul id="list"><li class="empty">Loading...</li></ul>
 <details id="setup"><summary>Setup</summary>
-<p class="sub">Enter the setup code from the label on the Base. Leave a field empty to keep its current value.</p>
+<p class="sub">Enter the setup code from the label on the Base, a name and the location. Leave a field empty to keep its current value. The Base then connects to WildNetwork by itself as soon as it has internet.</p>
 <form id="form" autocomplete="off">
 <label>Setup code<input id="f-code" required autocapitalize="characters" spellcheck="false"></label>
 <label>Station name<input id="f-name" maxlength="64"></label>
 <div class="row"><label>Latitude<input id="f-lat" inputmode="decimal"></label><label>Longitude<input id="f-lon" inputmode="decimal"></label></div>
+<p><button type="button" id="geo">Use this phone's location</button> <span class="sub" id="geomsg"></span></p>
+<h3>How the Base gets internet</h3>
+<p class="sub">Fill in one of these, or neither if a phone will carry the data out.</p>
+<label>4G: APN from your SIM provider<input id="f-apn" spellcheck="false" placeholder="for example internet"></label>
+<div class="row"><label>Wi-Fi network<input id="f-ssid" spellcheck="false"></label><label>Wi-Fi password<input id="f-psk" type="password"></label></div>
+<details class="adv"><summary>Advanced</summary>
+<p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from WildNetwork.</p>
 <label>WildNetwork API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
-<label>4G APN (from your SIM provider)<input id="f-apn" spellcheck="false"></label>
-<div class="row"><label>Wi-Fi network<input id="f-ssid" spellcheck="false"></label><label>Wi-Fi password<input id="f-psk" type="password"></label></div>
+</details>
 <p><button class="primary" type="submit">Save</button></p>
 <div class="msg" id="fmsg"></div>
 </form></details>
@@ -693,6 +793,9 @@ function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className
 function ago(iso){if(!iso)return 'never';const s=(Date.now()-new Date(iso).getTime())/1000;if(s<90)return 'just now';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
 function tile(label,value){const d=el('div','tile');d.append(el('b',null,value),el('span',null,label));return d}
 async function loadInfo(){const i=await j('/api/info');$('name').textContent=i.name||i.hostname;
+const reg=i.registration||'';const rp=$('reg');
+rp.className='reg '+(reg==='registered'?'ok':'wait');
+rp.textContent=reg==='registered'?'Connected to WildNetwork':reg==='waiting-for-internet'?'Will connect to WildNetwork when the Base has internet':reg==='waiting-for-setup'?'Will connect to WildNetwork once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to WildNetwork yet ('+reg.slice(7)+'). It keeps trying.':'';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 $('foot').textContent='wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
 if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';if(!i.configured)$('setup').open=true}}
@@ -722,8 +825,12 @@ if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
 if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
-m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up.':' Location and a key or device id are still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
+m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to WildNetwork by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
+$('geo').onclick=()=>{const g=$('geomsg');
+if(!navigator.geolocation){g.textContent='This browser cannot share its location here. Type the coordinates instead (from a map app).';return}
+g.textContent='Finding location...';navigator.geolocation.getCurrentPosition(p=>{$('f-lat').value=p.coords.latitude.toFixed(5);$('f-lon').value=p.coords.longitude.toFixed(5);g.textContent='Location filled in.'},
+e=>{g.textContent='Could not get the location'+(window.isSecureContext?'':' (many browsers only share it on secure pages)')+'. Type the coordinates instead, for example from a map app.'},{enableHighAccuracy:true,timeout:20000})};
 refresh();setInterval(refresh,30000);
 </script></body></html>
 """
@@ -889,6 +996,7 @@ def main() -> None:
                              "1" if cfg.hotspot_force else "0"]))
         return
     app = App(cfg)
+    app.start_registration()
     srv = make_server(app)
     log(f"wnbase {VERSION} on {cfg.bind}:{cfg.port}, wdx-agent {app.agent.VERSION}, hotspot {hotspot_ssid(cfg, app.hw)}")
     try:
