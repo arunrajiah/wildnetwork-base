@@ -28,6 +28,9 @@ apt-get update -qq
 apt-get install -y -qq "${PKGS[@]}" >/dev/null
 if [ "$MODE" = --image ]; then
   usermod -aG docker,audio "$RUN_USER"
+  # pi-gen installs cloud-init even when the image does not use it; keep it from changing the host name, users or
+  # SSH keys at boot. The Base sets those itself at first boot.
+  if [ -d /etc/cloud ]; then touch /etc/cloud/cloud-init.disabled; fi
 fi
 
 # --- wdx-agent -----------------------------------------------------------------------------------------------
