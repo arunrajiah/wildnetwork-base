@@ -1,0 +1,15 @@
+[Unit]
+Description=wdx-agent: push detections from this WildNetwork Base to WildNetwork
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Skipped (not failed) until an API key is set. Without one the Base works in pickup mode: the phone carries data out.
+ExecCondition=/bin/sh -c "grep -Eq '^api_key[[:space:]]*=[[:space:]]*[^[:space:]]+' /etc/wdx-agent.ini"
+ExecStart=/usr/bin/python3 /opt/wdx-agent/wdx_agent.py --config /etc/wdx-agent.ini
+Restart=always
+RestartSec=30
+User=__USER__
+
+[Install]
+WantedBy=multi-user.target

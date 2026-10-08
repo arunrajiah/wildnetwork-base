@@ -1,0 +1,9 @@
+[Unit]
+Description=Bring the WildNetwork Base hotspot back when no Wi-Fi uplink is connected
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

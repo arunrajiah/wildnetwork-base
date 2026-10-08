@@ -1,0 +1,18 @@
+[Unit]
+Description=WildNetwork Base local service (dashboard and setup API)
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/wnbase/wnbase.py --config /etc/wnbase/wnbase.ini
+Restart=always
+RestartSec=5
+# Root: binds port 80, writes /etc/wdx-agent.ini, runs nmcli and systemctl.
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

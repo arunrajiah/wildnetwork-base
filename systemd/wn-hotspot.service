@@ -1,0 +1,11 @@
+[Unit]
+Description=WildNetwork Base Wi-Fi hotspot
+After=NetworkManager.service wnbase.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/wnbase/hotspot.sh
+
+[Install]
+WantedBy=multi-user.target
