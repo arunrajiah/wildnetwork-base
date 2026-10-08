@@ -1,14 +1,22 @@
 <img src="assets/logo.svg" width="64" alt="WildNetwork">
 
-# WildNetwork Base: device software
+# WildNetwork Base
 
-The WildNetwork Base is an open-hardware station that listens for birds and other wildlife and sends what it hears to [WildNetwork](https://wildnetwork.arunrajiah.com). This repository holds the software that runs on it:
+**A WildNetwork Base is a small open-hardware station that listens for birds and other wildlife, identifies them on the spot, and adds what it hears to the live [WildNetwork](https://wildnetwork.arunrajiah.com) map.** It is a Raspberry Pi with a microphone (and optionally a 4G modem and a solar battery) in a weatherproof box. It works without internet: it keeps its detections until it can send them, or until a phone carries them out.
 
-- **BirdNET-Go** listens to the microphone and identifies species (installed with its official installer).
-- **wdx-agent** turns BirdNET-Go detections into WDX events and uploads them over 4G, Wi-Fi or Ethernet.
-- **wnbase** (this repo) serves a dashboard and a small local API over the Base's own Wi-Fi hotspot, so the WildNetwork field app or any browser can set the Base up, check its health, play recent clips and carry data out when the Base has no connection.
+**Who it is for:** anyone who wants to put up a listening station, from a garden to a nature reserve, and rangers and researchers who need stations in places without Wi-Fi.
 
-Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. The parts list and enclosure are in the hardware docs (to come). There are two ways to get the software on it: flash the ready-made SD card image (easiest, works without internet), or install on a stock Raspberry Pi OS Lite (64-bit, Bookworm or later).
+**Get one running in three steps:**
+
+1. **Flash** the WildNetwork Base image onto a microSD card ([how](#flash-an-sd-card)).
+2. **Power on** the Base with the card inside and wait about 2 minutes.
+3. **Set up** from your phone or any browser: join the Wi-Fi `WildNetwork-XXXX` with the password on the label, open http://10.42.0.1, and enter the station's name and location ([details](#first-time-setup)).
+
+What runs on it: **BirdNET-Go** identifies species from the microphone, **wdx-agent** sends the detections to WildNetwork over 4G, Wi-Fi or Ethernet, and **wnbase** (this repository) serves the dashboard and setup page over the Base's own Wi-Fi.
+
+Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. The parts list and enclosure are in the hardware docs (to come).
+
+> Part of an open wildlife toolkit. Not sure this is the project you need? See [which project to use](#part-of-an-open-wildlife-toolkit).
 
 ## Flash an SD card
 
@@ -25,36 +33,6 @@ Everything the Base needs is on the card, including BirdNET-Go (release 20260823
 **Accounts and SSH.** The image has one user, `wildnetwork`. Its password is a long random one made at first boot and never shown, so there is no default password, and the root account is locked. SSH is off. It switches on, key only (no passwords, no root login), when `wildnetwork-ssh.pub` is on the boot partition; the file is read at every boot, so removing it switches SSH off again at the next boot. Log in with `ssh wildnetwork@wildnetwork-base-xxxx.local` (or `@10.42.0.1` over the hotspot); `sudo` works without a password for this user, because there is no password to type.
 
 **Wi-Fi country.** The image is set to `GB` so the hotspot can start offline (2.4 GHz is allowed on the same channels almost everywhere). Change it with `sudo raspi-config nonint do_wifi_country XX` if you use the Base's Wi-Fi to join a network in another country.
-
-### Build the image yourself
-
-```sh
-./image/build.sh
-```
-
-This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz`. The `SD card image` GitHub Actions workflow runs the same script when started by hand or when a `v*` tag is pushed, and attaches the image to that tag's release.
-
-The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
-
-## Install on a stock Raspberry Pi
-
-1. Flash Raspberry Pi OS Lite (64-bit) with Raspberry Pi Imager. Set a user, and set your Wi-Fi country.
-2. Copy this repository to the Pi (or `git clone` it) and run:
-
-```sh
-sudo ./install.sh
-```
-
-The installer:
-
-- installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
-- installs wdx-agent from `https://wildnetwork.arunrajiah.com/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
-- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there;
-- writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
-- installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
-- prints the hotspot name, its password and the setup code.
-
-It is safe to run again: configs, the setup code and BirdNET-Go are kept. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
 
 ## First-time setup
 
@@ -81,11 +59,51 @@ When the Base has no 4G or Wi-Fi, a phone carries the data out:
 
 If a step fails, nothing is lost: the same batch is offered again. WildNetwork deduplicates by `eventId`, so sending a batch twice is harmless. If the Base's own uploader has already moved past the batch, the ack is accepted but the queue is not moved backwards.
 
-## Local API
+## Security notes
+
+- The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
+- Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
+- The WildNetwork API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint.
+- Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
+- Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
+
+## Install on a stock Raspberry Pi
+
+1. Flash Raspberry Pi OS Lite (64-bit) with Raspberry Pi Imager. Set a user, and set your Wi-Fi country.
+2. Copy this repository to the Pi (or `git clone` it) and run:
+
+```sh
+sudo ./install.sh
+```
+
+The installer:
+
+- installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
+- installs wdx-agent from `https://wildnetwork.arunrajiah.com/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
+- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there;
+- writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
+- installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
+- prints the hotspot name, its password and the setup code.
+
+It is safe to run again: configs, the setup code and BirdNET-Go are kept. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
+
+## For developers
+
+### Build the SD card image
+
+```sh
+./image/build.sh
+```
+
+This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz`. The `SD card image` GitHub Actions workflow runs the same script when started by hand or when a `v*` tag is pushed, and attaches the image to that tag's release.
+
+The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
+
+### Local API
 
 All responses are JSON. GET endpoints allow any origin (CORS). POST endpoints need the header `X-Setup-Code`.
 
-### GET /api/info
+#### GET /api/info
 
 No code needed.
 
@@ -97,7 +115,7 @@ No code needed.
 
 `configured` is true once a location and either an API key or a device id are set. `birdnetGo` is the BirdNET-Go image tag, or null.
 
-### POST /api/config
+#### POST /api/config
 
 Header `X-Setup-Code`. Every field is optional; only the fields sent are changed.
 
@@ -115,7 +133,7 @@ Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new 
 
 A `warnings` list is added when, for example, no modem is present, and a `notes` list when BirdNET-Go could not be updated (for example `config.yaml` not found: then set the location in BirdNET-Go's web page on port 8080). Wrong code: `403`. After 10 wrong codes in 10 minutes from one address: `429`. Bad values: `400`.
 
-### GET /api/status
+#### GET /api/status
 
 Device health in the WDX `device-status` format from wdx-agent, plus `lastUpload` (when the queue last moved, by upload or pickup) and `network`:
 
@@ -130,7 +148,7 @@ Device health in the WDX `device-status` format from wdx-agent, plus `lastUpload
 
 `queue.pending` counts one batch at most, so 500 means 500 or more.
 
-### GET /api/detections?limit=N
+#### GET /api/detections?limit=N
 
 Up to N (default and maximum 500) WDX events not yet uploaded, and the cursor to acknowledge them with:
 
@@ -140,11 +158,11 @@ Up to N (default and maximum 500) WDX events not yet uploaded, and the cursor to
 
 `cursor` is null and `events` empty when nothing is waiting. The cursor can also cover skipped rows (low confidence, noise), so a batch can have a cursor and no events: acknowledge it anyway.
 
-### POST /api/ack
+#### POST /api/ack
 
 Header `X-Setup-Code`. Body `{"cursor": <cursor from the last /api/detections response>}`. Response `{"ok": true, "advanced": true}`. Any other cursor is refused with `409`.
 
-### GET /api/recent?hours=24
+#### GET /api/recent?hours=24
 
 Detections from the BirdNET-Go database for the dashboard, newest first, at most 200 (hours 1 to 168):
 
@@ -153,23 +171,15 @@ Detections from the BirdNET-Go database for the dashboard, newest first, at most
   "commonName": null, "confidence": 0.92, "clip": "turdus_merula_92p_20261008T094100Z.wav", "unlikely": false}]}
 ```
 
-### GET /clips/&lt;name&gt;
+#### GET /clips/&lt;name&gt;
 
 The audio clip with that file name from the BirdNET-Go clips folder. Only plain file names are accepted; anything with a path is refused. Supports `Range` requests.
 
-### GET /
+#### GET /
 
 The dashboard: health, the last 24 hours of detections with play buttons, and the setup form. One page with no outside resources, so it works without internet.
 
-## Security notes
-
-- The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
-- Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
-- The WildNetwork API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint.
-- Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
-- Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
-
-## Files
+### Files
 
 | Path | What |
 | --- | --- |
@@ -203,6 +213,25 @@ ifname = wlan0
 ssid_prefix = WildNetwork-
 force = no
 ```
+
+## Part of an open wildlife toolkit
+
+Eight open source projects for listening to, identifying and mapping wildlife. They work together, but you rarely need more than one or two. Start from what you want to do:
+
+| I want to | Use | What it is |
+|---|---|---|
+| See where birds and wildlife are moving, or download the data | [WildNetwork](https://github.com/arunrajiah/wildnetwork) | The live map and open data: [wildnetwork.arunrajiah.com](https://wildnetwork.arunrajiah.com) |
+| Build a monitoring station from open hardware | [WildNetwork Base](https://github.com/arunrajiah/wildnetwork-base) (this project) | Software for the open WildNetwork station (Raspberry Pi, microphone, solar); SD card image coming |
+| Share detections from a BirdNET-Pi, BirdNET-Go, camera trap or bat detector you already have | [wdx-agent](https://github.com/arunrajiah/wdx-agent) | One small program that sends your station's detections. BirdWeather stations are already included and need nothing |
+| Follow your own station on your phone | [BirdEcho](https://github.com/arunrajiah/birdecho) | Android app for BirdNET-Pi, BirdNET-Go and BirdWeather stations |
+| Identify a sound you just heard | [WildEcho](https://github.com/arunrajiah/wildecho) | Phone app: record a clip, get ranked species |
+| Run your own sound identification server | [wildecho-api](https://github.com/arunrajiah/wildecho-api) | Self-hosted species identification from audio, on CPU, no API keys |
+| Check camera trap predictions before you use them | [SpeciesNet Studio](https://github.com/arunrajiah/speciesnet-studio) | Self-hosted review of SpeciesNet results |
+| Make your own software or device produce or read detections in a common format | [WDX](https://github.com/arunrajiah/wildlife-detection-exchange) | The open format for one AI wildlife detection; maps to Darwin Core |
+
+**How this one fits.** The WildNetwork Base is the open station. It identifies birds on the device with BirdNET-Go, sends detections to WildNetwork through wdx-agent, and is set up from a phone or a browser.
+
+**How they connect:** stations (a WildNetwork Base, BirdNET-Pi, BirdNET-Go, camera traps) produce detections; wdx-agent sends them in the WDX format; WildNetwork maps them. Connected today: wdx-agent and the WildNetwork Base send to WildNetwork, and WildEcho uses wildecho-api. Planned: Base setup in BirdEcho, and WDX export from wildecho-api and SpeciesNet Studio.
 
 ## Licence
 
