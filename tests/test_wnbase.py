@@ -144,6 +144,7 @@ class Server(unittest.TestCase):
         self.assertEqual((a["station_name"], a["latitude"], a["round_coords"], a["api_key"], a["device_id"]),
                          ("Hill top", "51.5", "1", "wn_new_key", "wnb_1"))
         self.assertEqual(a["custom_key"], "keep me")
+        self.assertEqual(a["system"], "wildnetwork-base")  # the device key only accepts this system name
         self.assertIn(["systemctl", "restart", "wdx-agent"], self.calls)
         self.assertTrue(any(c[:3] == ["nmcli", "connection", "add"] and "wn-4g" in c for c in self.calls))
         st, info, _ = self.req("GET", "/api/info")

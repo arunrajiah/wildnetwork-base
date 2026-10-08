@@ -389,6 +389,9 @@ class App:
             updates["api_key"] = text("apiKey", r"[\x21-\x7e]*", 200)
         if "deviceId" in body:
             updates["device_id"] = text("deviceId", r"[A-Za-z0-9_.:-]*", 100)
+            # A key from the WildNetwork device registry only accepts events from this system name.
+            updates["system"] = "wildnetwork-base"
+            updates["sensor_model"] = "WildNetwork Base"
         if "endpoint" in body:
             updates["endpoint"] = text("endpoint", r"https?://[\x21-\x7e]+", 300)
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
@@ -495,6 +498,8 @@ class App:
             st = self.agent.collect_status(s)
         except SystemExit as e:  # wdx-agent exits when the database has no coordinates and none are configured
             st = {"error": str(e)}
+        if isinstance(st.get("software"), dict):
+            st["software"]["wnbase"] = VERSION
         try:
             st["lastUpload"] = iso_utc(os.path.getmtime(s.state_path))
         except OSError:

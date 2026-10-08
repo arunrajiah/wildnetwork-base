@@ -81,6 +81,9 @@ if [ ! -f /etc/wdx-agent.ini ]; then
 endpoint = $BASE_URL/api/v1/events
 api_key =
 source = birdnet-go
+# The Base's WildNetwork key only accepts this system name.
+system = wildnetwork-base
+sensor_model = WildNetwork Base
 path = $BIRDNET_DB
 station_name = $(hostname)
 latitude =
