@@ -6,7 +6,33 @@ The WildNetwork Base is an open-hardware station that listens for birds and othe
 - **wdx-agent** turns BirdNET-Go detections into WDX events and uploads them over 4G, Wi-Fi or Ethernet.
 - **wnbase** (this repo) serves a dashboard and a small local API over the Base's own Wi-Fi hotspot, so the WildNetwork field app or any browser can set the Base up, check its health, play recent clips and carry data out when the Base has no connection.
 
-Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5 with Raspberry Pi OS Lite (64-bit, Bookworm or later), a USB microphone, and optionally a USB 4G modem and a battery. The parts list and enclosure are in the hardware docs (to come). A ready-to-flash SD card image (built with pi-gen) is planned next; it is not done yet.
+Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. The parts list and enclosure are in the hardware docs (to come). There are two ways to get the software on it: flash the ready-made SD card image (easiest, works without internet), or install on a stock Raspberry Pi OS Lite (64-bit, Bookworm or later).
+
+## Flash an SD card
+
+1. Download the newest `wildnetwork-base` `.img.xz` from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases).
+2. Open Raspberry Pi Imager, choose your Raspberry Pi model, then **Operating System > Use custom** and pick the downloaded file. Skip Imager's OS customisation: this image does not use it.
+3. Optional, for SSH: after flashing, open the card's boot partition (called `bootfs`) on your computer and add a file named `wildnetwork-ssh.pub` with your SSH public key(s), one per line.
+4. Put the card in the Base and power it on. The first boot takes about 2 minutes (it grows the file system to fill the card and loads BirdNET-Go).
+5. Join the Wi-Fi `WildNetwork-XXXX` with the password on the label, open http://10.42.0.1 and continue with [First-time setup](#first-time-setup).
+
+Everything the Base needs is on the card, including BirdNET-Go (release 20260823, see `image/VERSIONS`), so the first boot needs no internet. BirdNET-Go picks the first microphone it finds; its own settings page is at http://10.42.0.1:8080.
+
+**No label?** The hotspot name, password and setup code are made on the Base at its first boot. They are shown on the login screen of a monitor plugged into the HDMI port, and written to `wildnetwork-setup.txt` on the boot partition (put the card in a computer to read it). Anyone holding the SD card can read that file; that is acceptable, because anyone with the card in hand already has full access to the Base.
+
+**Accounts and SSH.** The image has one user, `wildnetwork`. Its password is a long random one made at first boot and never shown, so there is no default password, and the root account is locked. SSH is off. It switches on, key only (no passwords, no root login), when `wildnetwork-ssh.pub` is on the boot partition; the file is read at every boot, so removing it switches SSH off again at the next boot. Log in with `ssh wildnetwork@wildnetwork-base-xxxx.local` (or `@10.42.0.1` over the hotspot); `sudo` works without a password for this user, because there is no password to type.
+
+**Wi-Fi country.** The image is set to `GB` so the hotspot can start offline (2.4 GHz is allowed on the same channels almost everywhere). Change it with `sudo raspi-config nonint do_wifi_country XX` if you use the Base's Wi-Fi to join a network in another country.
+
+### Build the image yourself
+
+```sh
+./image/build.sh
+```
+
+This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz`. The `SD card image` GitHub Actions workflow runs the same script when started by hand or when a `v*` tag is pushed, and attaches the image to that tag's release.
+
+The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
 
 ## Install on a stock Raspberry Pi
 
@@ -147,8 +173,11 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | --- | --- |
 | `base/wnbase.py` | Dashboard and local API (`/opt/wnbase/wnbase.py`) |
 | `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
-| `install.sh` | Installer |
-| `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service` |
+| `install.sh` | Installer for a stock Raspberry Pi |
+| `base/provision.sh` | Steps shared by `install.sh` and the image build |
+| `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh`, `base/audio-detect.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit, microphone choice |
+| `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
+| `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
 | `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`) |
 
 `/etc/wnbase/wnbase.ini`:

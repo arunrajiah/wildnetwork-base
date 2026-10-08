@@ -1,6 +1,6 @@
 [Unit]
 Description=WildNetwork Base Wi-Fi hotspot
-After=NetworkManager.service wnbase.service
+After=NetworkManager.service wnbase.service wn-firstboot.service
 Wants=NetworkManager.service
 
 [Service]

@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+# SD card image build output
+image/.pi-gen/
+image/deploy/
+image/stage-wildnetwork/*/files/

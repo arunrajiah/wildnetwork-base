@@ -1,0 +1,12 @@
+[Unit]
+Description=WildNetwork Base: key-only SSH from wildnetwork-ssh.pub on the boot partition
+After=local-fs.target wn-firstboot.service
+Before=ssh.service
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/opt/wnbase/ssh-key.sh __USER__
+
+[Install]
+WantedBy=multi-user.target

@@ -18,8 +18,12 @@ IFS=$'\t' read -r IFNAME SSID PSK FORCE < <(python3 "$WNBASE" --config "$CONF" -
 
 nmcli radio wifi on || true
 
-# STATE and CONNECTION of the Wi-Fi interface, e.g. "connected:home-wifi".
-current="$(nmcli -t -f DEVICE,STATE,CONNECTION device status | awk -F: -v d="$IFNAME" '$1 == d { print $2 ":" $3 }')"
+# STATE and CONNECTION of the Wi-Fi interface, e.g. "connected:home-wifi". At boot the interface can take a few
+# seconds to appear.
+for _ in $(seq 30); do
+  current="$(nmcli -t -f DEVICE,STATE,CONNECTION device status | awk -F: -v d="$IFNAME" '$1 == d { print $2 ":" $3 }')"
+  case "$current" in ""|unavailable:*|unmanaged:*) sleep 1 ;; *) break ;; esac
+done
 if [ -z "$current" ]; then
   echo "no Wi-Fi interface $IFNAME"
   exit 1

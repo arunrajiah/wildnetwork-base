@@ -9,6 +9,7 @@ Usage:
   wnbase.py --config /etc/wnbase/wnbase.ini          run the service
   wnbase.py --config ... --setup-code                print the setup code (created on first use)
   wnbase.py --config ... --hotspot-env               print "ifname<TAB>ssid<TAB>password<TAB>force" for hotspot.sh
+  wnbase.py --hardware-id                            print the hardware id (Raspberry Pi serial number)
 """
 from __future__ import annotations
 
@@ -848,8 +849,12 @@ def main() -> None:
     ap.add_argument("--config", default=os.environ.get("WNBASE_CONFIG", "/etc/wnbase/wnbase.ini"))
     ap.add_argument("--setup-code", action="store_true", help="print the setup code and exit")
     ap.add_argument("--hotspot-env", action="store_true", help="print hotspot settings for hotspot.sh and exit")
+    ap.add_argument("--hardware-id", action="store_true", help="print the hardware id and exit")
     args = ap.parse_args()
     cfg = Config(args.config)
+    if args.hardware_id:
+        print(hardware_id())
+        return
     if args.setup_code or args.hotspot_env:
         code, _ = ensure_setup_code(cfg.setup_code_file)
         if args.setup_code:

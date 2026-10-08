@@ -1,0 +1,17 @@
+[Unit]
+Description=WildNetwork Base first boot (setup code, host name, BirdNET-Go)
+ConditionPathExists=!/var/lib/wnbase/firstboot-done
+After=local-fs.target docker.service avahi-daemon.service dbus.service
+Wants=docker.service
+Before=wnbase.service wn-hotspot.service getty.target ssh.service wn-ssh-key.service
+
+[Service]
+# READY comes after the quick part, so the dashboard and hotspot do not wait for BirdNET-Go to load.
+Type=notify
+NotifyAccess=all
+RemainAfterExit=yes
+ExecStart=/opt/wnbase/firstboot.sh __USER__
+TimeoutStartSec=5min
+
+[Install]
+WantedBy=multi-user.target

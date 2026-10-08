@@ -1,0 +1,12 @@
+# Pinned inputs of the SD card image. Sourced by build.sh and the pi-gen stage.
+# pi-gen: tag 2026-10-06-raspios-trixie-arm64 (Raspberry Pi OS Lite, Debian 13 "trixie", 64-bit)
+PI_GEN_REPO=https://github.com/RPi-Distro/pi-gen
+PI_GEN_REF=b2cd98a9ee08a31ef7d0110ed09f2492bbd972ec
+# BirdNET-Go container (release 20260823); the digest is of the multi-arch index, checked before download
+BIRDNET_GO_IMAGE=ghcr.io/tphakala/birdnet-go:20260823
+BIRDNET_GO_DIGEST=sha256:233b94f1d3b27b261ec8d997364db0cb953f3e3b3362a89e9e22ad4a589143d6
+BIRDNET_GO_CONFIG_URL=https://raw.githubusercontent.com/tphakala/birdnet-go/20260823/internal/conf/config.yaml
+# crane (go-containerregistry) downloads the container without a Docker daemon
+CRANE_VERSION=v0.22.1
+CRANE_SHA256_Linux_arm64=898c0cff975f898a33e8c4580bdafb0e7c02c7faa33374e946762f97c4ab7110
+CRANE_SHA256_Linux_x86_64=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0

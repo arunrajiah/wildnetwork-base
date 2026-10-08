@@ -1,6 +1,6 @@
 [Unit]
 Description=WildNetwork Base local service (dashboard and setup API)
-After=network.target NetworkManager.service
+After=network.target NetworkManager.service wn-firstboot.service
 Wants=NetworkManager.service
 
 [Service]
