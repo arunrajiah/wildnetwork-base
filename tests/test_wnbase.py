@@ -231,8 +231,21 @@ class Server(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertTrue(r.getheader("content-type").startswith("text/html"))
         self.assertIn(b"WildNetwork Base", data)
-        self.assertNotIn(b"http://", data.replace(b"http://10.42.0.1", b""))  # nothing loaded from elsewhere
+        local = data.replace(b"http://10.42.0.1", b"").replace(b"http://www.w3.org/2000/svg", b"")  # SVG namespace, not a URL to load
+        self.assertNotIn(b"http://", local)  # nothing loaded from elsewhere
+        self.assertNotIn(b"https://", local)
         self.assertNotIn("\u2014".encode(), data)
+
+    def test_dashboard_carries_the_logo(self):
+        logo = (ROOT / "assets" / "logo.svg").read_text()
+        self.assertEqual(wnbase.LOGO_SVG, logo)
+        st, data, _ = self.req("GET", "/")
+        html = data.decode()
+        self.assertIn("<title>WildNetwork Base</title>", html)
+        self.assertIn(logo, html)
+        self.assertIn('rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg', html)
+        href = html.split('rel="icon" type="image/svg+xml" href="', 1)[1].split('"', 1)[0]
+        self.assertNotIn("#", href)
 
     def test_unknown_path(self):
         self.assertEqual(self.req("GET", "/api/nope")[0], 404)

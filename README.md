@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" width="64" alt="WildNetwork">
+
 # WildNetwork Base: device software
 
 The WildNetwork Base is an open-hardware station that listens for birds and other wildlife and sends what it hears to [WildNetwork](https://wildnetwork.arunrajiah.com). This repository holds the software that runs on it:
@@ -205,3 +207,7 @@ force = no
 ## Licence
 
 Apache-2.0. See `LICENSE`.
+
+## Name and logo
+
+The code is open source (Apache-2.0). The name "WildNetwork" and the logo are not part of the code licence: forks that run as a public service or ship devices should use their own name and logo. See [TRADEMARKS.md](TRADEMARKS.md).

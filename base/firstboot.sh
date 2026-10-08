@@ -34,7 +34,8 @@ ssh-keygen -A >/dev/null
 # 4. Setup details for owners without the label: HDMI console and the boot partition.
 mkdir -p /etc/issue.d
 cat > /etc/issue.d/wildnetwork.issue <<ISSUE
-WildNetwork Base $NAME
+WildNetwork Base
+  Name:        $NAME
   Wi-Fi:       $SSID
   Password:    wn-$CODE
   Setup code:  $CODE
@@ -43,8 +44,9 @@ WildNetwork Base $NAME
 ISSUE
 if [ -d /boot/firmware ]; then
   cat > /boot/firmware/wildnetwork-setup.txt <<TXT
-WildNetwork Base $NAME
+WildNetwork Base
 
+Name:        $NAME
 Wi-Fi:       $SSID
 Password:    wn-$CODE
 Setup code:  $CODE

@@ -615,14 +615,37 @@ class App:
         raise ApiError(404, "not found")
 
 
+LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#0e7490"/>
+      <stop offset="0.6" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#bbf7d0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#07111f"/>
+  <!-- migration arc with network nodes, growing toward the bird -->
+  <path d="M10 53 C 11 43, 17 36, 28 32" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+  <circle cx="10" cy="53" r="2.8" fill="#0e7490"/>
+  <circle cx="14.5" cy="42.5" r="3.3" fill="#1596b3"/>
+  <circle cx="23.5" cy="34" r="3.8" fill="#22d3ee"/>
+  <!-- swallow in flight, heading up and to the right -->
+  <g transform="translate(41 25) rotate(48) scale(1.08)">
+    <path d="M0,-10 C1.6,-6.5 2.4,-4.5 15,-7.5 C9,-2 4.5,1.5 2.2,4 L3.6,11.5 L0,8.2 L-3.6,11.5 L-2.2,4 C-4.5,1.5 -9,-2 -15,-7.5 C-2.4,-4.5 -1.6,-6.5 0,-10 Z" fill="url(#g)"/>
+  </g>
+</svg>
+"""  # assets/logo.svg, byte for byte (the WildNetwork logo is not under the code licence)
+
+
 DASHBOARD = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WildNetwork Base</title>
+<link rel="icon" type="image/svg+xml" href="%%FAVICON%%">
 <style>
 :root{--bg:#0f1412;--card:#18201d;--line:#26302c;--text:#e6ece9;--dim:#93a39c;--accent:#5fd39a;--warn:#f0b357;--bad:#ef6f6c}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:720px;margin:0 auto;padding:16px}
-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px}.logo{flex:none;line-height:0}.logo svg{width:36px;height:36px}
 h1{font-size:1.3rem;margin:0;flex:1;overflow-wrap:anywhere}h2{font-size:1rem;margin:22px 0 8px;color:var(--dim);font-weight:600}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}.dot.ok{background:var(--accent)}.dot.bad{background:var(--bad)}
 .sub{color:var(--dim);font-size:.85rem}
@@ -640,7 +663,7 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.msg{margin-top:10px;font-size:.9rem}.err{color:var(--bad)}.okc{color:var(--accent)}
 .empty{color:var(--dim);padding:14px 4px}
 </style></head><body><main>
-<header><span id="dot" class="dot"></span><h1 id="name">WildNetwork Base</h1></header>
+<header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">WildNetwork Base</h1><span id="dot" class="dot" title="Health"></span></header>
 <div class="sub" id="hw"></div>
 <h2>Health</h2>
 <div class="grid" id="health"></div>
@@ -704,6 +727,8 @@ $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.classN
 refresh();setInterval(refresh,30000);
 </script></body></html>
 """
+DASHBOARD = DASHBOARD.replace("%%LOGO%%", LOGO_SVG).replace(
+    "%%FAVICON%%", "data:image/svg+xml," + quote(LOGO_SVG, safe="=:/,.-'()"))
 
 
 class Handler(BaseHTTPRequestHandler):
