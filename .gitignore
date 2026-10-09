@@ -4,3 +4,13 @@ __pycache__/
 image/.pi-gen/
 image/deploy/
 image/stage-wildnetwork/*/files/
+
+# Local AI assistant / OS / env files
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.DS_Store
+.env
+.env.*
+!.env.example
