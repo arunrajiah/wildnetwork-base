@@ -63,9 +63,9 @@ if [ ! -f /etc/wdx-agent.ini ]; then
 endpoint = $BASE_URL/api/v1/events
 api_key =
 source = birdnet-go
-# The Base's WildNetwork key only accepts this system name.
+# The Base's Wildlife Network key only accepts this system name.
 system = wildnetwork-base
-sensor_model = WildNetwork Base
+sensor_model = Wildlife Network Base
 path = $APP_DIR/data/birdnet.db
 station_name = $NAME
 # latitude and longitude are added by the Base setup (wdx-agent cannot read them empty)
@@ -101,7 +101,7 @@ setup_code_file = /etc/wnbase/setup-code
 
 [hotspot]
 ifname = wlan0
-ssid_prefix = WildNetwork-
+ssid_prefix = Wildlife Network-
 # yes: keep the hotspot up even when the Wi-Fi radio could join a known network
 force = no
 INI

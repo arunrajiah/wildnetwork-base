@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the WildNetwork Base SD card image with the official pi-gen (Docker based).
+# Build the Wildlife Network Base SD card image with the official pi-gen (Docker based).
 #   image/build.sh                       result: image/deploy/<date>-wildnetwork-base.img.xz
 # Needs Docker (privileged containers, loop devices) and about 15 GB of free disk.
 # Options (environment variables):

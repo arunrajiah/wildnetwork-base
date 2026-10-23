@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# WildNetwork Base software: the same provisioning script as a live install, run inside the image chroot.
+# Wildlife Network Base software: the same provisioning script as a live install, run inside the image chroot.
 # Not under /tmp: pi-gen mounts a fresh tmpfs there inside the chroot.
 
 install -d "${ROOTFS_DIR}/usr/local/src/wn-src"

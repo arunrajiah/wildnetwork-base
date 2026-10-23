@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# WildNetwork Base installer. Run as root on a fresh Raspberry Pi OS Lite (64-bit, Bookworm or later):
+# Wildlife Network Base installer. Run as root on a fresh Raspberry Pi OS Lite (64-bit, Bookworm or later):
 #   sudo ./install.sh
 # Safe to run again: existing configs, the setup code and an existing BirdNET-Go install are kept.
 # Options (environment variables):
 #   WN_USER              user that runs BirdNET-Go and wdx-agent (default: the user who ran sudo, else uid 1000)
-#   WN_BASE_URL          WildNetwork site (default https://wlnw.org)
+#   WN_BASE_URL          Wildlife Network site (default https://wlnw.org)
 #   WN_SKIP_BIRDNET=1    do not install BirdNET-Go
 #   WN_BIRDNET_VERSION   BirdNET-Go image tag for its installer (default: latest)
 #   WN_WIFI_COUNTRY      two-letter Wi-Fi country code, needed once for the hotspot (e.g. GB, US, IN)
@@ -22,7 +22,7 @@ if [ -z "$RUN_USER" ] || [ "$RUN_USER" = root ]; then
 fi
 [ -n "$RUN_USER" ] || { echo "No regular user found; set WN_USER"; exit 1; }
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
-say "Installing the WildNetwork Base software for user $RUN_USER"
+say "Installing the Wildlife Network Base software for user $RUN_USER"
 
 if [ -n "${WN_WIFI_COUNTRY:-}" ] && command -v raspi-config >/dev/null; then
   raspi-config nonint do_wifi_country "$WN_WIFI_COUNTRY"

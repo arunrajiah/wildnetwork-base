@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Keep the WildNetwork Base Wi-Fi hotspot up (NetworkManager).
-#   SSID      WildNetwork-<last 4 characters of the hardware id>
+# Keep the Wildlife Network Base Wi-Fi hotspot up (NetworkManager).
+#   SSID      Wildlife Network-<last 4 characters of the hardware id>
 #   password  wn-<setup code>
 #   address   10.42.0.1 (NetworkManager shared mode also runs DHCP for phones)
 # Run at boot and every 2 minutes by wn-hotspot.timer. If the Wi-Fi radio is already connected to a network

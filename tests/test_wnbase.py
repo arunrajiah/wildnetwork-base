@@ -231,7 +231,7 @@ class Server(unittest.TestCase):
         st, data, r = self.req("GET", "/")
         self.assertEqual(st, 200)
         self.assertTrue(r.getheader("content-type").startswith("text/html"))
-        self.assertIn(b"WildNetwork Base", data)
+        self.assertIn(b"Wildlife Network Base", data)
         local = data.replace(b"http://10.42.0.1", b"").replace(b"http://www.w3.org/2000/svg", b"")  # SVG namespace, not a URL to load
         self.assertNotIn(b"http://", local)  # nothing loaded from elsewhere
         self.assertNotIn(b"https://", local)
@@ -242,7 +242,7 @@ class Server(unittest.TestCase):
         self.assertEqual(wnbase.LOGO_SVG, logo)
         st, data, _ = self.req("GET", "/")
         html = data.decode()
-        self.assertIn("<title>WildNetwork Base</title>", html)
+        self.assertIn("<title>Wildlife Network Base</title>", html)
         self.assertIn(logo, html)
         self.assertIn('rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg', html)
         href = html.split('rel="icon" type="image/svg+xml" href="', 1)[1].split('"', 1)[0]

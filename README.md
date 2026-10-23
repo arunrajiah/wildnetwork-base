@@ -1,18 +1,18 @@
-<img src="assets/logo.svg" width="64" alt="WildNetwork">
+<img src="assets/logo.svg" width="64" alt="Wildlife Network">
 
-# WildNetwork Base
+# Wildlife Network Base
 
-**A WildNetwork Base is a small open-hardware station that listens for birds and other wildlife, identifies them on the spot, and adds what it hears to the live [WildNetwork](https://wlnw.org) map.** It is a Raspberry Pi with a microphone (and optionally a 4G modem and a solar battery) in a weatherproof box. It works without internet: it keeps its detections until it can send them, or until a phone carries them out.
+**A Wildlife Network Base is a small open-hardware station that listens for birds and other wildlife, identifies them on the spot, and adds what it hears to the live [Wildlife Network](https://wlnw.org) map.** It is a Raspberry Pi with a microphone (and optionally a 4G modem and a solar battery) in a weatherproof box. It works without internet: it keeps its detections until it can send them, or until a phone carries them out.
 
 **Who it is for:** anyone who wants to put up a listening station, from a garden to a nature reserve, and rangers and researchers who need stations in places without Wi-Fi.
 
 **Get one running in three steps:**
 
-1. **Flash** the WildNetwork Base image onto a microSD card ([how](#flash-an-sd-card)).
+1. **Flash** the Wildlife Network Base image onto a microSD card ([how](#flash-an-sd-card)).
 2. **Power on** the Base with the card inside and wait about 2 minutes.
-3. **Set up** from your phone or any browser: join the Wi-Fi `WildNetwork-XXXX` with the password on the label, open http://10.42.0.1, and enter the station's name and location ([details](#first-time-setup)).
+3. **Set up** from your phone or any browser: join the Wi-Fi `Wildlife Network-XXXX` with the password on the label, open http://10.42.0.1, and enter the station's name and location ([details](#first-time-setup)).
 
-What runs on it: **BirdNET-Go** identifies species from the microphone, **wdx-agent** sends the detections to WildNetwork over 4G, Wi-Fi or Ethernet, and **wnbase** (this repository) serves the dashboard and setup page over the Base's own Wi-Fi.
+What runs on it: **BirdNET-Go** identifies species from the microphone, **wdx-agent** sends the detections to Wildlife Network over 4G, Wi-Fi or Ethernet, and **wnbase** (this repository) serves the dashboard and setup page over the Base's own Wi-Fi.
 
 Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger microSD card, a USB microphone, and optionally a USB 4G modem and a battery. [Build a Base: parts and step-by-step guide](docs/HARDWARE.md).
 
@@ -24,7 +24,7 @@ Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger micro
 2. Open Raspberry Pi Imager, choose your Raspberry Pi model, then **Operating System > Use custom** and pick the downloaded file. Skip Imager's OS customisation: this image does not use it.
 3. Optional, for SSH: after flashing, open the card's boot partition (called `bootfs`) on your computer and add a file named `wildnetwork-ssh.pub` with your SSH public key(s), one per line.
 4. Put the card in the Base and power it on. The first boot takes about 2 minutes (it grows the file system to fill the card and loads BirdNET-Go).
-5. Join the Wi-Fi `WildNetwork-XXXX` with the password on the label, open http://10.42.0.1 and continue with [First-time setup](#first-time-setup).
+5. Join the Wi-Fi `Wildlife Network-XXXX` with the password on the label, open http://10.42.0.1 and continue with [First-time setup](#first-time-setup).
 
 Everything the Base needs is on the card, including BirdNET-Go (release 20260823, see `image/VERSIONS`), so the first boot needs no internet. BirdNET-Go picks the first microphone it finds; its own settings page is at http://10.42.0.1:8080.
 
@@ -38,11 +38,11 @@ Everything the Base needs is on the card, including BirdNET-Go (release 20260823
 
 Each Base has its own hotspot and setup code. The label on the device shows:
 
-- **Wi-Fi:** `WildNetwork-XXXX` (the last 4 characters of the Raspberry Pi serial number)
+- **Wi-Fi:** `Wildlife Network-XXXX` (the last 4 characters of the Raspberry Pi serial number)
 - **Password:** `wn-` followed by the setup code
 - **Setup code:** 8 letters and digits
 
-**With the WildNetwork field app:** join the hotspot, open the app and follow the steps. The app reads `/api/info` and sends your location, key and connection details to `/api/config`.
+**With the Wildlife Network field app:** join the hotspot, open the app and follow the steps. The app reads `/api/info` and sends your location, key and connection details to `/api/config`.
 
 **With a browser:** join the hotspot, open http://10.42.0.1 and open **Setup**. Enter:
 
@@ -50,7 +50,7 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 2. a name for the station and its location (type the coordinates, or tap **Use this phone's location**; some phone browsers only share the location on secure pages, so typing always works);
 3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out.
 
-That is all. The Base then connects to WildNetwork by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to WildNetwork", or "Will connect to WildNetwork when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
+That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
 The hotspot runs whenever the Wi-Fi radio is not connected to a network. When the Base joins a Wi-Fi network (the one set during setup, or one set when the SD card was flashed) the hotspot stops, and the dashboard is at `http://<hostname>.local` on that network. To keep the hotspot on regardless, set `force = yes` under `[hotspot]` in `/etc/wnbase/wnbase.ini`.
 
@@ -59,17 +59,17 @@ The hotspot runs whenever the Wi-Fi radio is not connected to a network. When th
 When the Base has no 4G or Wi-Fi, a phone carries the data out:
 
 1. The phone joins the hotspot and calls `GET /api/detections`. It gets a batch of WDX events and a `cursor`.
-2. The phone uploads the events to WildNetwork, `POST /api/v1/events`, with its own key.
+2. The phone uploads the events to Wildlife Network, `POST /api/v1/events`, with its own key.
 3. The phone calls `POST /api/ack` with that `cursor` and the setup code. The Base moves its queue past the batch.
 4. Repeat until `events` is empty.
 
-If a step fails, nothing is lost: the same batch is offered again. WildNetwork deduplicates by `eventId`, so sending a batch twice is harmless. If the Base's own uploader has already moved past the batch, the ack is accepted but the queue is not moved backwards.
+If a step fails, nothing is lost: the same batch is offered again. Wildlife Network deduplicates by `eventId`, so sending a batch twice is harmless. If the Base's own uploader has already moved past the batch, the ack is accepted but the queue is not moved backwards.
 
 ## Security notes
 
 - The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
-- The WildNetwork API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
+- The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 
@@ -219,7 +219,7 @@ setup_code_file = /etc/wnbase/setup-code
 
 [hotspot]
 ifname = wlan0
-ssid_prefix = WildNetwork-
+ssid_prefix = Wildlife Network-
 force = no
 ```
 
@@ -229,18 +229,18 @@ Eight open source projects for listening to, identifying and mapping wildlife. T
 
 | I want to | Use | What it is |
 |---|---|---|
-| See where birds and wildlife are moving, or download the data | [WildNetwork](https://github.com/arunrajiah/wildnetwork) | The live map and open data: [wlnw.org](https://wlnw.org) |
-| Build a monitoring station from open hardware | [WildNetwork Base](https://github.com/arunrajiah/wildnetwork-base) (this project) | Software and a ready-to-flash SD card image (beta) for the open WildNetwork station (Raspberry Pi, microphone, solar) |
+| See where birds and wildlife are moving, or download the data | [Wildlife Network](https://github.com/wlnw-org/wildnetwork) | The live map and open data: [wlnw.org](https://wlnw.org) |
+| Build a monitoring station from open hardware | [Wildlife Network Base](https://github.com/arunrajiah/wildnetwork-base) (this project) | Software and a ready-to-flash SD card image (beta) for the open Wildlife Network station (Raspberry Pi, microphone, solar) |
 | Share detections from a BirdNET-Pi, BirdNET-Go, camera trap or bat detector you already have | [wdx-agent](https://github.com/arunrajiah/wdx-agent) | One small program that sends your station's detections. BirdWeather stations are already included and need nothing |
 | Follow your own station on your phone | [BirdEcho](https://github.com/arunrajiah/birdecho) | Android app for BirdNET-Pi, BirdNET-Go and BirdWeather stations |
 | Identify a sound you just heard | [WildEcho](https://github.com/arunrajiah/wildecho) | Phone app: record a clip, get ranked species |
 | Run your own sound identification server | [wildecho-api](https://github.com/arunrajiah/wildecho-api) | Self-hosted species identification from audio, on CPU, no API keys |
-| Check camera trap predictions before you use them | [SpeciesNet Studio](https://github.com/arunrajiah/speciesnet-studio) | Self-hosted review of SpeciesNet results, then send them to WildNetwork |
+| Check camera trap predictions before you use them | [SpeciesNet Studio](https://github.com/arunrajiah/speciesnet-studio) | Self-hosted review of SpeciesNet results, then send them to Wildlife Network |
 | Make your own software or device produce or read detections in a common format | [WDX](https://github.com/arunrajiah/wildlife-detection-exchange) | The open format for one AI wildlife detection; maps to Darwin Core |
 
-**How this one fits.** The WildNetwork Base is the open station. It identifies birds on the device with BirdNET-Go, sends detections to WildNetwork through wdx-agent, and is set up from a phone or a browser.
+**How this one fits.** The Wildlife Network Base is the open station. It identifies birds on the device with BirdNET-Go, sends detections to Wildlife Network through wdx-agent, and is set up from a phone or a browser.
 
-**How they connect:** stations (a WildNetwork Base, BirdNET-Pi, BirdNET-Go, camera traps) produce detections; wdx-agent sends them in the WDX format, SpeciesNet Studio adds a human check for camera traps, and WildNetwork maps them. Connected today: wdx-agent, the WildNetwork Base, SpeciesNet Studio and WildEcho (if you switch sharing on) send to WildNetwork, BirdEcho shows WildNetwork arrivals near your station, and WildEcho uses wildecho-api. Planned: Base setup in BirdEcho.
+**How they connect:** stations (a Wildlife Network Base, BirdNET-Pi, BirdNET-Go, camera traps) produce detections; wdx-agent sends them in the WDX format, SpeciesNet Studio adds a human check for camera traps, and Wildlife Network maps them. Connected today: wdx-agent, the Wildlife Network Base, SpeciesNet Studio and WildEcho (if you switch sharing on) send to Wildlife Network, BirdEcho shows Wildlife Network arrivals near your station, and WildEcho uses wildecho-api. Planned: Base setup in BirdEcho.
 
 ## Licence
 
@@ -248,4 +248,4 @@ Apache-2.0. See `LICENSE`.
 
 ## Name and logo
 
-The code is open source (Apache-2.0). The name "WildNetwork" and the logo are not part of the code licence: forks that run as a public service or ship devices should use their own name and logo. See [TRADEMARKS.md](TRADEMARKS.md).
+The code is open source (Apache-2.0). The name "Wildlife Network" and the logo are not part of the code licence: forks that run as a public service or ship devices should use their own name and logo. See [TRADEMARKS.md](TRADEMARKS.md).

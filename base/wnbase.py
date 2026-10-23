@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""wnbase: the local web service of a WildNetwork Base.
+"""wnbase: the local web service of a Wildlife Network Base.
 
 Serves a dashboard and a small JSON API over the Base's own Wi-Fi hotspot (http://10.42.0.1) for the
-WildNetwork field app and for any browser. Detections, cursors and health come from wdx-agent, which is
+Wildlife Network field app and for any browser. Detections, cursors and health come from wdx-agent, which is
 imported from its own file so there is one copy of that logic. Standard library only.
 
 Usage:
@@ -85,7 +85,7 @@ class Config:
         self.birdnet_container = g(w, "birdnet_container", "birdnet-go")
         self.setup_code_file = g(w, "setup_code_file", "/etc/wnbase/setup-code")
         self.hotspot_ifname = g(h, "ifname", "wlan0")
-        self.hotspot_ssid_prefix = g(h, "ssid_prefix", "WildNetwork-")
+        self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
         self.hotspot_force = g(h, "force", "no").lower() in ("1", "yes", "true", "on")
         for k, v in overrides.items():
             setattr(self, k, v)
@@ -382,7 +382,7 @@ class App:
             "registration": "registered" if s and s.api_key else self.registration,
         }
 
-    # --- registration with WildNetwork -------------------------------------------------------------------
+    # --- registration with Wildlife Network -------------------------------------------------------------------
 
     def register_once(self) -> int:
         """One registration attempt when the Base is set up but has no key. Returns seconds until the next check."""
@@ -403,11 +403,11 @@ class App:
             status, res = self.http_post(url, body, 30)
         except (OSError, ValueError) as e:  # URLError, timeouts, DNS: most likely no internet yet
             self.registration = "waiting-for-internet"
-            log(f"registration: WildNetwork not reachable ({type(e).__name__}); retrying in {self.reg_backoff}s")
+            log(f"registration: Wildlife Network not reachable ({type(e).__name__}); retrying in {self.reg_backoff}s")
             return self._backoff()
         if status == 429:
             self.registration = "error: too many new devices from this network today"
-            log("registration: WildNetwork allows 5 new devices per network per day; retrying in an hour")
+            log("registration: Wildlife Network allows 5 new devices per network per day; retrying in an hour")
             return REGISTER_MAX_BACKOFF
         key, device = res.get("apiKey"), res.get("deviceId")
         if status not in (200, 201) or not isinstance(key, str) or not key or not isinstance(device, str):
@@ -420,7 +420,7 @@ class App:
                 self.registration = "registered"
                 return REGISTER_EVERY
             write_ini(self.cfg.agent_config, "agent", {"api_key": key, "device_id": device, "system": "wildnetwork-base"})
-        log(f"registered with WildNetwork as device {device}")
+        log(f"registered with Wildlife Network as device {device}")
         rc, out = self.run(["systemctl", "restart", self.cfg.agent_service], 60)
         if rc != 0:
             log(f"could not restart {self.cfg.agent_service}: {out.strip()[:200]}")
@@ -480,9 +480,9 @@ class App:
             updates["api_key"] = text("apiKey", r"[\x21-\x7e]*", 200)
         if "deviceId" in body:
             updates["device_id"] = text("deviceId", r"[A-Za-z0-9_.:-]*", 100)
-            # A key from the WildNetwork device registry only accepts events from this system name.
+            # A key from the Wildlife Network device registry only accepts events from this system name.
             updates["system"] = "wildnetwork-base"
-            updates["sensor_model"] = "WildNetwork Base"
+            updates["sensor_model"] = "Wildlife Network Base"
         if "endpoint" in body:
             updates["endpoint"] = text("endpoint", r"https?://[\x21-\x7e]+", 300)
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
@@ -726,12 +726,12 @@ LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width=
     <path d="M0,-10 C1.6,-6.5 2.4,-4.5 15,-7.5 C9,-2 4.5,1.5 2.2,4 L3.6,11.5 L0,8.2 L-3.6,11.5 L-2.2,4 C-4.5,1.5 -9,-2 -15,-7.5 C-2.4,-4.5 -1.6,-6.5 0,-10 Z" fill="url(#g)"/>
   </g>
 </svg>
-"""  # assets/logo.svg, byte for byte (the WildNetwork logo is not under the code licence)
+"""  # assets/logo.svg, byte for byte (the Wildlife Network logo is not under the code licence)
 
 
 DASHBOARD = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WildNetwork Base</title>
+<title>Wildlife Network Base</title>
 <link rel="icon" type="image/svg+xml" href="%%FAVICON%%">
 <style>
 :root{--bg:#0f1412;--card:#18201d;--line:#26302c;--text:#e6ece9;--dim:#93a39c;--accent:#5fd39a;--warn:#f0b357;--bad:#ef6f6c}
@@ -756,7 +756,7 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 .empty{color:var(--dim);padding:14px 4px}h3{font-size:.95rem;margin:18px 0 0}details.adv{background:none;border:0;padding:0;margin-top:14px}
 .reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}
 </style></head><body><main>
-<header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">WildNetwork Base</h1><span id="dot" class="dot" title="Health"></span></header>
+<header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">Wildlife Network Base</h1><span id="dot" class="dot" title="Health"></span></header>
 <div class="sub" id="hw"></div>
 <p class="reg" id="reg"></p>
 <h2>Health</h2>
@@ -765,7 +765,7 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 <h2>Last 24 hours</h2>
 <ul id="list"><li class="empty">Loading...</li></ul>
 <details id="setup"><summary>Setup</summary>
-<p class="sub">Enter the setup code from the label on the Base, a name and the location. Leave a field empty to keep its current value. The Base then connects to WildNetwork by itself as soon as it has internet.</p>
+<p class="sub">Enter the setup code from the label on the Base, a name and the location. Leave a field empty to keep its current value. The Base then connects to Wildlife Network by itself as soon as it has internet.</p>
 <form id="form" autocomplete="off">
 <label>Setup code<input id="f-code" required autocapitalize="characters" spellcheck="false"></label>
 <label>Station name<input id="f-name" maxlength="64"></label>
@@ -776,8 +776,8 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 <label>4G: APN from your SIM provider<input id="f-apn" spellcheck="false" placeholder="for example internet"></label>
 <div class="row"><label>Wi-Fi network<input id="f-ssid" spellcheck="false"></label><label>Wi-Fi password<input id="f-psk" type="password"></label></div>
 <details class="adv"><summary>Advanced</summary>
-<p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from WildNetwork.</p>
-<label>WildNetwork API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
+<p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from Wildlife Network.</p>
+<label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
 </details>
 <p><button class="primary" type="submit">Save</button></p>
@@ -795,7 +795,7 @@ function tile(label,value){const d=el('div','tile');d.append(el('b',null,value),
 async function loadInfo(){const i=await j('/api/info');$('name').textContent=i.name||i.hostname;
 const reg=i.registration||'';const rp=$('reg');
 rp.className='reg '+(reg==='registered'?'ok':'wait');
-rp.textContent=reg==='registered'?'Connected to WildNetwork':reg==='waiting-for-internet'?'Will connect to WildNetwork when the Base has internet':reg==='waiting-for-setup'?'Will connect to WildNetwork once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to WildNetwork yet ('+reg.slice(7)+'). It keeps trying.':'';
+rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting-for-internet'?'Will connect to Wildlife Network when the Base has internet':reg==='waiting-for-setup'?'Will connect to Wildlife Network once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to Wildlife Network yet ('+reg.slice(7)+'). It keeps trying.':'';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 $('foot').textContent='wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
 if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';if(!i.configured)$('setup').open=true}}
@@ -825,7 +825,7 @@ if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
 if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
-m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to WildNetwork by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
+m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
 $('geo').onclick=()=>{const g=$('geomsg');
 if(!navigator.geolocation){g.textContent='This browser cannot share its location here. Type the coordinates instead (from a map app).';return}
@@ -977,7 +977,7 @@ def make_server(app: App, bind: str | None = None, port: int | None = None) -> T
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="WildNetwork Base local service")
+    ap = argparse.ArgumentParser(description="Wildlife Network Base local service")
     ap.add_argument("--config", default=os.environ.get("WNBASE_CONFIG", "/etc/wnbase/wnbase.ini"))
     ap.add_argument("--setup-code", action="store_true", help="print the setup code and exit")
     ap.add_argument("--hotspot-env", action="store_true", help="print hotspot settings for hotspot.sh and exit")

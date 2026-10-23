@@ -1,8 +1,8 @@
-<img src="../assets/logo.svg" width="64" alt="WildNetwork">
+<img src="../assets/logo.svg" width="64" alt="Wildlife Network">
 
-# Build a WildNetwork Base
+# Build a Wildlife Network Base
 
-This guide takes you from a box of parts to a Base that is listening, identifying birds and showing up on the [WildNetwork](https://wlnw.org) map. No soldering and no programming are needed. Plan on about an hour for an indoor Base and half a day for an outdoor, solar-powered one.
+This guide takes you from a box of parts to a Base that is listening, identifying birds and showing up on the [Wildlife Network](https://wlnw.org) map. No soldering and no programming are needed. Plan on about an hour for an indoor Base and half a day for an outdoor, solar-powered one.
 
 There are three ways to build one. Pick the row that matches where the Base will live, then follow the steps.
 
@@ -71,7 +71,7 @@ The microphone matters more than any other part: a good one hears birds two or t
 
 1. On your computer, install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. Download the newest `wildnetwork-base` `.img.xz` file from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases).
-3. Put the microSD card in your computer. In Imager, choose your Raspberry Pi model, then **Operating System > Use custom**, pick the downloaded file, pick the card, and write it. Skip Imager's "OS customisation" step: the WildNetwork image does not use it.
+3. Put the microSD card in your computer. In Imager, choose your Raspberry Pi model, then **Operating System > Use custom**, pick the downloaded file, pick the card, and write it. Skip Imager's "OS customisation" step: the Wildlife Network image does not use it.
 4. Optional: to log in over SSH later, open the card's `bootfs` drive and add a file named `wildnetwork-ssh.pub` containing your SSH public key.
 
 ## 3. Test it on a table first
@@ -81,8 +81,8 @@ Always test indoors before you climb a pole.
 1. Put the card in the Pi. Plug in the microphone (and the 4G modem with its SIM, if you use one).
 2. Connect the power supply. The red light comes on, and the green light flickers while it starts.
 3. Wait about 2 minutes. The first start takes longer than later ones.
-4. On your phone, open the Wi-Fi settings and join **WildNetwork-XXXX**. The password is printed on the label as `wn-` followed by the setup code. No label yet? The setup code is also in the file `wildnetwork-setup.txt` on the card's `bootfs` drive, and on the screen if you plug in a monitor.
-5. Open **http://10.42.0.1** in the phone's browser. You should see the WildNetwork Base dashboard.
+4. On your phone, open the Wi-Fi settings and join **Wildlife Network-XXXX**. The password is printed on the label as `wn-` followed by the setup code. No label yet? The setup code is also in the file `wildnetwork-setup.txt` on the card's `bootfs` drive, and on the screen if you plug in a monitor.
+5. Open **http://10.42.0.1** in the phone's browser. You should see the Wildlife Network Base dashboard.
 6. Play a bird recording from another phone or speaker near the microphone. Within a minute or two it should appear under recent detections. BirdNET-Go's own page at http://10.42.0.1:8080 shows the live sound level, which tells you the microphone is working.
 
 If nothing appears, see [Troubleshooting](#7-troubleshooting).
@@ -91,16 +91,16 @@ If nothing appears, see [Troubleshooting](#7-troubleshooting).
 
 Do this while the Base is still on the table.
 
-**With the WildNetwork field app** (BirdEcho): choose "WildNetwork Base" and follow the steps.
+**With the Wildlife Network field app** (BirdEcho): choose "Wildlife Network Base" and follow the steps.
 
 **With any browser:** on the dashboard, open **Setup** and enter:
 
 1. The **setup code** from the label.
 2. A **name** for the station, for example "Hill top school". It is shown publicly, so do not use a person's name or a home address.
-3. The **location**. Use the phone's location or type the coordinates. The exact position stays on the Base so BirdNET-Go can rule out birds that do not occur there; WildNetwork only receives it rounded to about 1 km.
+3. The **location**. Use the phone's location or type the coordinates. The exact position stays on the Base so BirdNET-Go can rule out birds that do not occur there; Wildlife Network only receives it rounded to about 1 km.
 4. **How it reaches the internet:** your Wi-Fi network and password, or your SIM's APN for a 4G modem (common APNs in India: Jio `jionet`, Airtel `airtelgprs.com`, Vi `www`; check with your operator). HiLink dongles need no APN here. Leave it empty if a phone will collect the data on visits.
 
-Once it has internet, the Base registers itself with WildNetwork and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wlnw.org/stations).
+Once it has internet, the Base registers itself with Wildlife Network and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wlnw.org/stations).
 
 ## 5. Build the outdoor enclosure
 
@@ -150,12 +150,12 @@ Skip this for an indoor Base.
 
 | What you see | Likely cause | What to do |
 |---|---|---|
-| No WildNetwork-XXXX Wi-Fi after 3 minutes | The card was not written correctly, or the Base joined a known Wi-Fi network | Flash the card again. If it joined your Wi-Fi, open http://wildnetwork-base-XXXX.local on that network instead. |
+| No Wildlife Network-XXXX Wi-Fi after 3 minutes | The card was not written correctly, or the Base joined a known Wi-Fi network | Flash the card again. If it joined your Wi-Fi, open http://wildnetwork-base-XXXX.local on that network instead. |
 | The Pi restarts on its own | Power supply too weak, or the battery is low | Use the official supply. On solar, check the battery voltage and the converter rating. |
 | No detections after playing bird sounds | Microphone not found, or too quiet | Open http://10.42.0.1:8080 and check the sound level. Try another USB port; unplug other sound devices. |
 | Many wrong species | The location is not set, or the microphone picks up a lot of noise | Set the location in Setup. Move the Base away from noise. |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
-| "Will connect to WildNetwork when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
+| "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
 | Hot Base, slow detections in summer | Overheating | Add shade, a fan case or a bigger heatsink; move the box out of direct sun. |
 | Lost the setup code | | It is in `wildnetwork-setup.txt` on the card's `bootfs` drive. |
 

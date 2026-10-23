@@ -19,7 +19,7 @@ if [ -s "$KEYFILE" ]; then
   install -m 600 -o "$RUN_USER" -g "$RUN_USER" "$keys" "$HOME_DIR/.ssh/authorized_keys"
   rm -f "$keys"
   cat > /etc/ssh/sshd_config.d/10-wildnetwork.conf <<CONF
-# WildNetwork Base: keys from wildnetwork-ssh.pub only
+# Wildlife Network Base: keys from wildnetwork-ssh.pub only
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no

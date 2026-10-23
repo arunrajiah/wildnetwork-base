@@ -1,5 +1,5 @@
 [Unit]
-Description=WildNetwork Base first boot (setup code, host name, BirdNET-Go)
+Description=Wildlife Network Base first boot (setup code, host name, BirdNET-Go)
 ConditionPathExists=!/var/lib/wnbase/firstboot-done
 After=local-fs.target docker.service avahi-daemon.service dbus.service
 Wants=docker.service

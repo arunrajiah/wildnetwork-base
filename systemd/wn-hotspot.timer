@@ -1,5 +1,5 @@
 [Unit]
-Description=Bring the WildNetwork Base hotspot back when no Wi-Fi uplink is connected
+Description=Bring the Wildlife Network Base hotspot back when no Wi-Fi uplink is connected
 
 [Timer]
 OnBootSec=2min

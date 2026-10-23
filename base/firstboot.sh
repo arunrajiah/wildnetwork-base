@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# First boot of a WildNetwork Base SD card image (wn-firstboot.service, runs once).
+# First boot of a Wildlife Network Base SD card image (wn-firstboot.service, runs once).
 # Quick part, then READY so the dashboard and hotspot can start: random password for the user (never shown),
 # setup code, host name, SSH host keys, setup details on the console and the boot partition.
 # Slow part: load the BirdNET-Go container that ships in the image and start it. No internet needed.
@@ -34,7 +34,7 @@ ssh-keygen -A >/dev/null
 # 4. Setup details for owners without the label: HDMI console and the boot partition.
 mkdir -p /etc/issue.d
 cat > /etc/issue.d/wildnetwork.issue <<ISSUE
-WildNetwork Base
+Wildlife Network Base
   Name:        $NAME
   Wi-Fi:       $SSID
   Password:    wn-$CODE
@@ -44,7 +44,7 @@ WildNetwork Base
 ISSUE
 if [ -d /boot/firmware ]; then
   cat > /boot/firmware/wildnetwork-setup.txt <<TXT
-WildNetwork Base
+Wildlife Network Base
 
 Name:        $NAME
 Wi-Fi:       $SSID

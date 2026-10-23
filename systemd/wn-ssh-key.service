@@ -1,5 +1,5 @@
 [Unit]
-Description=WildNetwork Base: key-only SSH from wildnetwork-ssh.pub on the boot partition
+Description=Wildlife Network Base: key-only SSH from wildnetwork-ssh.pub on the boot partition
 After=local-fs.target wn-firstboot.service
 Before=ssh.service
 RequiresMountsFor=/boot/firmware
