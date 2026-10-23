@@ -12,7 +12,7 @@ say() { printf '\033[1;36m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
 
 SRC="${WN_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-BASE_URL="${WN_BASE_URL:-https://wildnetwork.arunrajiah.com}"
+BASE_URL="${WN_BASE_URL:-https://wlnw.org}"
 RUN_USER="${WN_USER:?WN_USER is required}"
 RUN_GROUP="$(id -gn "$RUN_USER")"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"

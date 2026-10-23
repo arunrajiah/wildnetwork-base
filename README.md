@@ -2,7 +2,7 @@
 
 # WildNetwork Base
 
-**A WildNetwork Base is a small open-hardware station that listens for birds and other wildlife, identifies them on the spot, and adds what it hears to the live [WildNetwork](https://wildnetwork.arunrajiah.com) map.** It is a Raspberry Pi with a microphone (and optionally a 4G modem and a solar battery) in a weatherproof box. It works without internet: it keeps its detections until it can send them, or until a phone carries them out.
+**A WildNetwork Base is a small open-hardware station that listens for birds and other wildlife, identifies them on the spot, and adds what it hears to the live [WildNetwork](https://wlnw.org) map.** It is a Raspberry Pi with a microphone (and optionally a 4G modem and a solar battery) in a weatherproof box. It works without internet: it keeps its detections until it can send them, or until a phone carries them out.
 
 **Who it is for:** anyone who wants to put up a listening station, from a garden to a nature reserve, and rangers and researchers who need stations in places without Wi-Fi.
 
@@ -85,7 +85,7 @@ sudo ./install.sh
 The installer:
 
 - installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
-- installs wdx-agent from `https://wildnetwork.arunrajiah.com/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
+- installs wdx-agent from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
 - installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
 - installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
@@ -130,7 +130,7 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 
 ```json
 {"name": "Hill top", "latitude": 51.5, "longitude": -0.12, "roundCoords": 2,
- "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wildnetwork.arunrajiah.com/api/v1/events",
+ "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wlnw.org/api/v1/events",
  "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}}
 ```
 
@@ -229,7 +229,7 @@ Eight open source projects for listening to, identifying and mapping wildlife. T
 
 | I want to | Use | What it is |
 |---|---|---|
-| See where birds and wildlife are moving, or download the data | [WildNetwork](https://github.com/arunrajiah/wildnetwork) | The live map and open data: [wildnetwork.arunrajiah.com](https://wildnetwork.arunrajiah.com) |
+| See where birds and wildlife are moving, or download the data | [WildNetwork](https://github.com/arunrajiah/wildnetwork) | The live map and open data: [wlnw.org](https://wlnw.org) |
 | Build a monitoring station from open hardware | [WildNetwork Base](https://github.com/arunrajiah/wildnetwork-base) (this project) | Software and a ready-to-flash SD card image (beta) for the open WildNetwork station (Raspberry Pi, microphone, solar) |
 | Share detections from a BirdNET-Pi, BirdNET-Go, camera trap or bat detector you already have | [wdx-agent](https://github.com/arunrajiah/wdx-agent) | One small program that sends your station's detections. BirdWeather stations are already included and need nothing |
 | Follow your own station on your phone | [BirdEcho](https://github.com/arunrajiah/birdecho) | Android app for BirdNET-Pi, BirdNET-Go and BirdWeather stations |

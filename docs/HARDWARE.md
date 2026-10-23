@@ -2,7 +2,7 @@
 
 # Build a WildNetwork Base
 
-This guide takes you from a box of parts to a Base that is listening, identifying birds and showing up on the [WildNetwork](https://wildnetwork.arunrajiah.com) map. No soldering and no programming are needed. Plan on about an hour for an indoor Base and half a day for an outdoor, solar-powered one.
+This guide takes you from a box of parts to a Base that is listening, identifying birds and showing up on the [WildNetwork](https://wlnw.org) map. No soldering and no programming are needed. Plan on about an hour for an indoor Base and half a day for an outdoor, solar-powered one.
 
 There are three ways to build one. Pick the row that matches where the Base will live, then follow the steps.
 
@@ -100,7 +100,7 @@ Do this while the Base is still on the table.
 3. The **location**. Use the phone's location or type the coordinates. The exact position stays on the Base so BirdNET-Go can rule out birds that do not occur there; WildNetwork only receives it rounded to about 1 km.
 4. **How it reaches the internet:** your Wi-Fi network and password, or your SIM's APN for a 4G modem (common APNs in India: Jio `jionet`, Airtel `airtelgprs.com`, Vi `www`; check with your operator). HiLink dongles need no APN here. Leave it empty if a phone will collect the data on visits.
 
-Once it has internet, the Base registers itself with WildNetwork and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wildnetwork.arunrajiah.com/stations).
+Once it has internet, the Base registers itself with WildNetwork and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wlnw.org/stations).
 
 ## 5. Build the outdoor enclosure
 
@@ -142,7 +142,7 @@ Skip this for an indoor Base.
 3. **Shade the box, sun the panel:** the Pi slows down above about 80 °C. Put the box on the shaded side of the pole or under a small roof, and point the panel south (in India and the northern hemisphere), tilted at about your latitude.
 4. **Microphone in the open:** not pressed against a wall or inside foliage. Sound should reach it from all sides.
 5. **Check the 4G signal** at the exact spot with a phone on the same operator before you fix the box.
-6. **After 24 hours,** look at the Base on the [stations page](https://wildnetwork.arunrajiah.com/stations): its last report time, battery and storage. Detections from it appear on the map.
+6. **After 24 hours,** look at the Base on the [stations page](https://wlnw.org/stations): its last report time, battery and storage. Detections from it appear on the map.
 
 **On each visit** (every one to three months): wipe the panel, replace the silica gel, check the cable glands and the microphone windscreen, and look for ants or wasps in the box. If the Base has no 4G, open the field app near it so the phone collects the waiting detections.
 

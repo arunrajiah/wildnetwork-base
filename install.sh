@@ -4,7 +4,7 @@
 # Safe to run again: existing configs, the setup code and an existing BirdNET-Go install are kept.
 # Options (environment variables):
 #   WN_USER              user that runs BirdNET-Go and wdx-agent (default: the user who ran sudo, else uid 1000)
-#   WN_BASE_URL          WildNetwork site (default https://wildnetwork.arunrajiah.com)
+#   WN_BASE_URL          WildNetwork site (default https://wlnw.org)
 #   WN_SKIP_BIRDNET=1    do not install BirdNET-Go
 #   WN_BIRDNET_VERSION   BirdNET-Go image tag for its installer (default: latest)
 #   WN_WIFI_COUNTRY      two-letter Wi-Fi country code, needed once for the hotspot (e.g. GB, US, IN)
@@ -15,7 +15,7 @@ warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo $0"; exit 1; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASE_URL="${WN_BASE_URL:-https://wildnetwork.arunrajiah.com}"
+BASE_URL="${WN_BASE_URL:-https://wlnw.org}"
 RUN_USER="${WN_USER:-${SUDO_USER:-}}"
 if [ -z "$RUN_USER" ] || [ "$RUN_USER" = root ]; then
   RUN_USER="$(getent passwd 1000 | cut -d: -f1 || true)"

@@ -2,7 +2,7 @@
 
 The WildNetwork Base software in this repository is open source under the Apache License 2.0 (see LICENSE), and you are welcome to run, study, change and share it under that licence.
 
-The name "WildNetwork" and the WildNetwork logo (`assets/logo.svg`, also built into the dashboard) are not covered by the code licence; the Apache License 2.0 does not grant trademark rights either (section 6). They identify the project run by Arun Rajiah at wildnetwork.arunrajiah.com, so that people know which map, data releases and methods they are relying on.
+The name "WildNetwork" and the WildNetwork logo (`assets/logo.svg`, also built into the dashboard) are not covered by the code licence; the Apache License 2.0 does not grant trademark rights either (section 6). They identify the project run by Arun Rajiah at wlnw.org, so that people know which map, data releases and methods they are relying on.
 
 ## You may, without asking
 
