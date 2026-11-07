@@ -5,10 +5,7 @@ image/.pi-gen/
 image/deploy/
 image/stage-wildnetwork/*/files/
 
-# Local AI assistant / OS / env files
-.claude/
-CLAUDE.md
-CLAUDE.local.md
+# Local OS / env files
 .mcp.json
 .DS_Store
 .env
