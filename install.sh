@@ -6,7 +6,8 @@
 #   WN_USER              user that runs BirdNET-Go and wdx-agent (default: the user who ran sudo, else uid 1000)
 #   WN_BASE_URL          Wildlife Network site (default https://wlnw.org)
 #   WN_SKIP_BIRDNET=1    do not install BirdNET-Go
-#   WN_BIRDNET_VERSION   BirdNET-Go image tag for its installer (default: latest)
+#   WN_BIRDNET_VERSION   BirdNET-Go release (default: the one pinned in image/VERSIONS, as in the SD card image;
+#                        "latest" takes BirdNET-Go's newest, which wdx-agent may not read yet)
 #   WN_WIFI_COUNTRY      two-letter Wi-Fi country code, needed once for the hotspot (e.g. GB, US, IN)
 set -euo pipefail
 
@@ -33,6 +34,11 @@ WN_USER="$RUN_USER" WN_BASE_URL="$BASE_URL" WN_SRC="$HERE" bash "$HERE/base/prov
 
 # --- BirdNET-Go (official installer, Docker based; data in ~/birdnet-go-app) ----------------------------------
 BNG_CFG="$RUN_HOME/birdnet-go-app/config/config.yaml"
+# Same BirdNET-Go release as the SD card image: its database layout is the one wdx-agent is tested against.
+BNG_PINNED="$(sed -n 's/^BIRDNET_GO_IMAGE=.*:\([^:]*\)$/\1/p' "$HERE/image/VERSIONS" 2>/dev/null || true)"
+BNG_VERSION="${WN_BIRDNET_VERSION:-${BNG_PINNED:-latest}}"
+# The installer from that release's tag (it matches the release); main's installer for "latest".
+BNG_REF="$BNG_VERSION"; [ "$BNG_VERSION" = latest ] && BNG_REF=main
 RERUN="cd '$HERE' && sudo ./install.sh"
 fail() {
   printf '\033[1;31m%s\033[0m\n' "$@" >&2
@@ -44,7 +50,7 @@ elif [ -f /etc/systemd/system/birdnet-go.service ] || [ -f /lib/systemd/system/b
      || [ -f "$BNG_CFG" ]; then
   say "BirdNET-Go is already installed"
 else
-  say "Installing BirdNET-Go with its official installer (this takes a while)"
+  say "Installing BirdNET-Go $BNG_VERSION with its official installer (this takes a while)"
   # The installer refuses to run as root and calls sudo itself. Without a terminal those sudo calls cannot ask for
   # a password and the installer can stop early, so make sure sudo works for $RUN_USER before starting.
   if ! sudo -u "$RUN_USER" -H sudo -n true 2>/dev/null; then
@@ -57,12 +63,12 @@ else
     fi
   fi
   bng="$(mktemp -d)"
-  curl -fsSL https://github.com/tphakala/birdnet-go/raw/main/install.sh -o "$bng/install.sh"
+  curl -fsSL "https://github.com/tphakala/birdnet-go/raw/$BNG_REF/install.sh" -o "$bng/install.sh"
   chown -R "$RUN_USER" "$bng"
   # --silent takes settings from BIRDNET_* variables. The location is written into its config.yaml later, when it
   # is entered in the Base setup.
   rc=0
-  (cd "$bng" && sudo -u "$RUN_USER" -H env BIRDNET_TELEMETRY=false bash ./install.sh -v "${WN_BIRDNET_VERSION:-latest}" --silent) || rc=$?
+  (cd "$bng" && sudo -u "$RUN_USER" -H env BIRDNET_TELEMETRY=false bash ./install.sh -v "$BNG_VERSION" --silent) || rc=$?
   rm -rf "$bng"
   # Its exit status is not enough: it has exited 0 after creating only the log folder.
   if ! out="$(bash "$HERE/base/birdnet-go-check.sh" "$BNG_CFG" 90)"; then

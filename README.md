@@ -86,13 +86,13 @@ The installer:
 
 - installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
 - installs wdx-agent from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
-- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
+- installs BirdNET-Go with its official installer (the one from the pinned release's tag, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
 - sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
 - installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
 - prints the hotspot name, its password and the setup code.
 
-It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
+It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default: the release pinned in `image/VERSIONS`, the same as the SD card image, currently `20260823`; `latest` takes BirdNET-Go's newest, whose database layout wdx-agent may not know yet), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
 
 ### The microphone
 
