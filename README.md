@@ -73,6 +73,7 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 - They are also written to `wildnetwork-setup.txt` on the boot partition, by the first boot of the image and by every run of `install.sh` on a stock Raspberry Pi, so a Base whose label is lost can still be set up. Anyone who can take the SD card out can read that file (and the whole card), so keep the Base closed and the card inside. Delete the file if you prefer: it is not needed to run the Base, and `install.sh` writes it again when run again. The install log `/var/log/wnbase-install.log` holds the same details and is readable by the Base's user and root.
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
+- Health reports (see [Health reports](#health-reports)) carry no audio, no detections and no location.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 - **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
@@ -155,6 +156,19 @@ The dashboard shows **No microphone found** when BirdNET-Go's log says it starte
 This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz` with its SHA-256 in `*.img.xz.sha256`. The `SD card image` GitHub Actions workflow runs the tests and the same script when started by hand or when a `v*` tag is pushed (for example `git tag v0.2.0 && git push origin v0.2.0`), and attaches the image and its `.sha256` to that tag's release. Everything in `base/`, `systemd/` and `install.sh` at the tagged commit goes into the image, so a release image always has the current microphone choice, checks and services.
 
 The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
+
+### Health reports
+
+Every 15 minutes (first one a minute after start) wnbase sends `POST <site>/api/v1/devices/<deviceId>/health` with the device key (`Authorization: Bearer`), once the Base is registered:
+
+```json
+{"at": "2026-11-19T06:00:00Z", "software": {"wnbase": "0.1.0", "wdx-agent": "0.4.4", "birdnet-go": "20260823"},
+ "uptimeSeconds": 86400, "boots": 3, "temperatureC": 48.2, "storage": {"freeMb": 21000, "totalMb": 31000},
+ "microphone": {"active": true, "lastDetectionAt": "2026-11-19T05:58:12Z"}, "queue": {"pending": 0},
+ "network": {"type": "wifi", "signal": 67, "signalUnit": "percent"}}
+```
+
+`boots` is counted by wnbase (`/var/lib/wnbase/boots.json`). `microphone.active` is `microphone.found` of `/api/info`; `lastDetectionAt` is the newest detection of the last 7 days, or null. `network` is left out when the Base has no uplink; `signal` is the Wi-Fi or 4G signal in percent (from NetworkManager or ModemManager) and is left out for Ethernet. There is no audio, no detection content and no location in it. While the Base is offline or not registered, reports wait in `/var/lib/wnbase/health-queue.json` (at most 96, one day; older ones are dropped) and are sent together as a JSON array once it is back.
 
 ### Local API
 

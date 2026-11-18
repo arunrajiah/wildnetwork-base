@@ -419,3 +419,73 @@ class TestStation(unittest.TestCase):
             self.skipTest("wdx-agent older than 0.4.4")
         ev = next(e for _, e in self.app.agent.pending_batch(s) if e)
         self.assertIs(ev["test"], True)
+
+
+class Health(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        make_db(f"{self.tmp}/birdnet.db")
+        self.ini = f"{self.tmp}/wdx-agent.ini"
+        Path(self.ini).write_text(
+            "[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\napi_key = wn_KEY\n"
+            f"device_id = wnb_1\npath = {self.tmp}/birdnet.db\nstation_id = s1\nstate_file = {self.tmp}/state.json\n"
+            "latitude = 51.5\nlongitude = -0.12\n")
+        self.posts, self.reply = [], (200, {})
+        cfg = wnbase.Config(None, agent_config=self.ini, agent_module=AGENT, setup_code_file=f"{self.tmp}/code",
+                            state_dir=f"{self.tmp}/state")
+        self.app = wnbase.App(cfg, runner=self.fake_run, http_post=self.fake_post)
+
+    def fake_run(self, args, timeout=30):
+        if args[:3] == ["nmcli", "-t", "-f"] and "--active" in args:
+            return 0, "wn-uplink:802-11-wireless:wlan0\n"
+        if args[:5] == ["nmcli", "-t", "-f", "ACTIVE,SIGNAL", "device"]:
+            return 0, "no:40\nyes:67\n"
+        if args[:1] == ["arecord"]:
+            return 0, "card 1: Device [USB Lavalier Microphone], device 0: USB Audio [USB Audio]\n"
+        if args[:2] == ["sh", "-c"]:
+            return 0, "capture started\n"
+        return 127, ""
+
+    def fake_post(self, url, body, timeout=30, token=None):
+        self.posts.append((url, body, token))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+    def test_report_fields(self):
+        rec = self.app.health()
+        self.assertEqual(set(rec["software"]), {"wnbase", "wdx-agent", "birdnet-go"})
+        self.assertEqual(rec["network"], {"type": "wifi", "signal": 67, "signalUnit": "percent"})
+        self.assertIs(rec["microphone"]["active"], True)
+        self.assertTrue(rec["microphone"]["lastDetectionAt"].endswith("Z"))
+        self.assertIn("pending", rec["queue"])
+        self.assertIn("freeMb", rec["storage"])
+        text = json.dumps(rec)
+        self.assertNotIn("51.5", text)       # no location
+        self.assertNotIn("wn_KEY", text)
+
+    def test_queue_while_offline_then_send_all(self):
+        self.reply = OSError("offline")
+        for i in range(3):
+            self.assertFalse(self.app.send_health({"at": f"t{i}"}))
+        self.reply = (200, {})
+        self.assertTrue(self.app.send_health({"at": "t3"}))
+        url, body, token = self.posts[-1]
+        self.assertEqual(url, "https://example.org/api/v1/devices/wnb_1/health")
+        self.assertEqual(token, "wn_KEY")
+        self.assertEqual([r["at"] for r in body], ["t0", "t1", "t2", "t3"])
+        self.assertTrue(self.app.send_health({"at": "t4"}))
+        self.assertEqual(self.posts[-1][1], {"at": "t4"})   # a single report is one object
+
+    def test_queue_is_capped(self):
+        self.reply = OSError("offline")
+        for i in range(wnbase.HEALTH_QUEUE_MAX + 5):
+            self.app.send_health({"at": str(i)})
+        q = json.loads(Path(self.app.health_queue_path()).read_text())
+        self.assertEqual(len(q), wnbase.HEALTH_QUEUE_MAX)
+        self.assertEqual(q[0]["at"], "5")
+
+    def test_not_registered_keeps_queue(self):
+        Path(self.ini).write_text(Path(self.ini).read_text().replace("api_key = wn_KEY", "api_key ="))
+        self.assertFalse(self.app.send_health({"at": "x"}))
+        self.assertEqual(self.posts, [])

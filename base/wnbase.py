@@ -53,6 +53,8 @@ MAX_BODY = 64 * 1024
 RECENT_MAX = 200
 REGISTER_EVERY = 300        # seconds between registration checks
 REGISTER_MAX_BACKOFF = 3600
+HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
+HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
 # BirdNET-Go log lines (lowercase) that tell whether it records: the newest one wins
 MIC_LOG_BAD = ("starting without active audio sources", "audio card capture failed")
@@ -506,6 +508,133 @@ class App:
             pending.update(values)
             os.makedirs(self.cfg.state_dir, exist_ok=True)
             write_atomic(path, json.dumps(pending).encode(), 0o600)
+
+    # --- health reports to Wildlife Network ---------------------------------------------------------------
+
+    def boots(self) -> int | None:
+        """How many times this Base has started, counted by wnbase from the kernel's boot id."""
+        try:
+            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        except OSError:
+            return None
+        path = os.path.join(self.cfg.state_dir, "boots.json")
+        with self.lock:
+            try:
+                st = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                st = {"count": 0, "bootId": None}
+            if st.get("bootId") != boot_id:
+                st = {"count": int(st.get("count") or 0) + 1, "bootId": boot_id}
+                try:
+                    os.makedirs(self.cfg.state_dir, exist_ok=True)
+                    write_atomic(path, json.dumps(st).encode(), 0o644)
+                except OSError:
+                    pass
+        return st["count"]
+
+    def wifi_signal(self) -> int | None:
+        rc, out = self.run(["nmcli", "-t", "-f", "ACTIVE,SIGNAL", "device", "wifi", "list", "--rescan", "no"], 15)
+        if rc == 0:
+            for line in out.splitlines():
+                f = nmcli_fields(line)
+                if len(f) >= 2 and f[0] == "yes" and f[1].isdigit():
+                    return int(f[1])
+        return None
+
+    def health(self) -> dict:
+        """One health report: versions, uptime, boots, temperature, storage, microphone, queue and network.
+        No audio, no detections, no location."""
+        rec: dict = {"at": iso_utc(time.time()),
+                     "software": {"wnbase": VERSION, "wdx-agent": getattr(self.agent, "VERSION", None),
+                                  "birdnet-go": self.birdnet_go_version()}}
+        st: dict = {}
+        try:
+            s = self.settings()
+            st = self.agent.collect_status(s)
+        except (ApiError, SystemExit, OSError, sqlite3.Error):
+            s = None
+        try:
+            rec["uptimeSeconds"] = int(float(Path("/proc/uptime").read_text().split()[0]))
+        except (OSError, ValueError, IndexError):
+            pass
+        boots = self.boots()
+        if boots is not None:
+            rec["boots"] = boots
+        for key in ("temperatureC", "storage", "queue"):
+            if key in st:
+                rec[key] = st[key]
+        last = None
+        if s is not None:
+            try:
+                rows = self.recent(168)["detections"]
+                last = rows[0]["time"] if rows else None
+            except ApiError:
+                pass
+        rec["microphone"] = {"active": self.microphone().get("found") is True, "lastDetectionAt": last}
+        net = self.network()
+        kind = net.get("uplink")
+        if kind:
+            n: dict = {"type": kind}
+            sig = (net.get("cellular") or {}).get("signalPercent") if kind == "4g" else \
+                self.wifi_signal() if kind == "wifi" else None
+            if sig is not None:
+                n["signal"], n["signalUnit"] = sig, "percent"
+            rec["network"] = n
+        return rec
+
+    def health_queue_path(self) -> str:
+        return os.path.join(self.cfg.state_dir, "health-queue.json")
+
+    def send_health(self, rec: dict | None = None) -> bool:
+        """Queue a report (a new one unless given) and send everything queued. True when the queue is empty.
+
+        POST <site>/api/v1/devices/<deviceId>/health with the device key: one object, or an array of them when
+        older reports were waiting. At most HEALTH_QUEUE_MAX are kept; the oldest go first."""
+        rec = rec if rec is not None else self.health()
+        path = self.health_queue_path()
+        with self.lock:
+            try:
+                queue = json.loads(Path(path).read_text())
+                queue = queue if isinstance(queue, list) else []
+            except (OSError, ValueError):
+                queue = []
+            queue = (queue + [rec])[-HEALTH_QUEUE_MAX:]
+            os.makedirs(self.cfg.state_dir, exist_ok=True)
+            write_atomic(path, json.dumps(queue).encode(), 0o600)
+        try:
+            s = self.settings()
+        except ApiError:
+            return False
+        if not s.api_key or not s.device_id:
+            return False
+        url = f"{self.api_base(s)}/api/v1/devices/{quote(s.device_id, safe='')}/health"
+        try:
+            status, res = self.http_post(url, queue if len(queue) > 1 else queue[0], 30, token=s.api_key)
+        except (OSError, ValueError) as e:
+            log(f"health report kept for later ({len(queue)} waiting; {type(e).__name__})")
+            return False
+        if status not in (200, 201, 202, 204):
+            log(f"health report refused (HTTP {status}: {str(res.get('error') or '')[:120]}); {len(queue)} waiting")
+            return False
+        with self.lock:
+            try:
+                now = json.loads(Path(path).read_text())
+                rest = now[len(queue):] if isinstance(now, list) and now[:len(queue)] == queue else []
+                write_atomic(path, json.dumps(rest).encode(), 0o600)
+            except (OSError, ValueError):
+                pass
+        return True
+
+    def start_health(self) -> None:
+        def loop():
+            time.sleep(60)   # let BirdNET-Go and the network come up first
+            while True:
+                try:
+                    self.send_health()
+                except Exception:
+                    log(f"health report error:\n{traceback.format_exc()}")
+                time.sleep(HEALTH_EVERY)
+        threading.Thread(target=loop, name="health", daemon=True).start()
 
     def register_once(self) -> int:
         """One registration attempt when the Base is set up but has no key. Returns seconds until the next check."""
@@ -1169,6 +1298,7 @@ def main() -> None:
         return
     app = App(cfg)
     app.start_registration()
+    app.start_health()
     srv = make_server(app)
     log(f"wnbase {VERSION} on {cfg.bind}:{cfg.port}, wdx-agent {app.agent.VERSION}, hotspot {hotspot_ssid(cfg, app.hw)}")
     try:
