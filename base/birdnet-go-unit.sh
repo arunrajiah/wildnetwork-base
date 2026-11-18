@@ -33,8 +33,8 @@ ExecStartPre=-/bin/sh -c 'mount --make-rshared /mnt/birdnet-go/external'
 ExecStartPre=-/bin/chown -h ${HOST_UID}:${HOST_GID} /mnt/birdnet-go/external
 # Disable Wi-Fi power saving, as BirdNET-Go's installer does on a Raspberry Pi
 ExecStartPre=-/bin/sh -c 'for i in /sys/class/net/wlan*; do [ -d "\$\$i" ] && iw dev "\$\$(basename "\$\$i")" set power_save off; done; true'
-# Wildlife Network Base: point BirdNET-Go at the first microphone while its config still says "sysdefault"
-ExecStartPre=-/opt/wnbase/audio-detect.sh ${CONFIG_DIR}/config.yaml
+# Wildlife Network Base: point BirdNET-Go at the first USB microphone while its config still says "sysdefault"
+ExecStartPre=-/usr/bin/python3 /opt/wnbase/mic.py --config ${CONFIG_DIR}/config.yaml --state /var/lib/wnbase/mic-device
 ExecStart=/usr/bin/docker run --rm \\
     --name birdnet-go \\
     -p 8080:8080 \\

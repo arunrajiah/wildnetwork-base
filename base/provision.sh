@@ -50,7 +50,7 @@ fi
 rm -f "$tmp"
 
 # --- wnbase --------------------------------------------------------------------------------------------------
-for f in wnbase.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh audio-detect.sh; do
+for f in wnbase.py mic.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh; do
   install -m 755 "$SRC/base/$f" "/opt/wnbase/$f"
 done
 
