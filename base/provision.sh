@@ -20,7 +20,8 @@ APP_DIR="$RUN_HOME/birdnet-go-app"
 
 # --- packages ------------------------------------------------------------------------------------------------
 # dnsmasq-base: NetworkManager needs it for the hotspot's DHCP (shared mode). alsa-utils: microphone detection.
-PKGS=(network-manager modemmanager dnsmasq-base sqlite3 python3 curl ca-certificates alsa-utils)
+# avahi-daemon: <host>.local and the _wlnw-base._tcp service that apps look for.
+PKGS=(network-manager modemmanager dnsmasq-base sqlite3 python3 curl ca-certificates alsa-utils avahi-daemon)
 # The image carries BirdNET-Go as a container, so it needs Docker; BirdNET-Go's own installer adds it on a live install.
 [ "$MODE" = --image ] && PKGS+=(docker.io)
 export DEBIAN_FRONTEND=noninteractive
@@ -50,7 +51,7 @@ fi
 rm -f "$tmp"
 
 # --- wnbase --------------------------------------------------------------------------------------------------
-for f in wnbase.py mic.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh; do
+for f in wnbase.py mic.py bngauth.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh setup-file.sh; do
   install -m 755 "$SRC/base/$f" "/opt/wnbase/$f"
 done
 
@@ -82,7 +83,7 @@ fi
 chmod 640 /etc/wdx-agent.ini
 chown "root:$RUN_GROUP" /etc/wdx-agent.ini
 install -d -m 755 -o "$RUN_USER" -g "$RUN_GROUP" /var/lib/wdx-agent
-install -d -m 755 /etc/wnbase /var/lib/wnbase
+install -d -m 755 /etc/wnbase /var/lib/wnbase /etc/avahi/services
 
 if [ ! -f /etc/wnbase/wnbase.ini ]; then
   cat > /etc/wnbase/wnbase.ini <<INI

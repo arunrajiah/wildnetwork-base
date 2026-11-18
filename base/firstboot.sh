@@ -42,19 +42,7 @@ Wildlife Network Base
   Then open:   http://10.42.0.1
 
 ISSUE
-if [ -d /boot/firmware ]; then
-  cat > /boot/firmware/wildnetwork-setup.txt <<TXT
-Wildlife Network Base
-
-Name:        $NAME
-Wi-Fi:       $SSID
-Password:    wn-$CODE
-Setup code:  $CODE
-Then open:   http://10.42.0.1
-
-Anyone holding this SD card can read this file. Keep the card inside the Base.
-TXT
-fi
+/opt/wnbase/setup-file.sh "$NAME" "$SSID" "$CODE"
 
 # The root file system is grown to the full card by Raspberry Pi OS itself on the first boot (rpi-resize).
 systemd-notify --ready 2>/dev/null || true
@@ -70,6 +58,8 @@ install -d -o "$RUN_USER" -g "$RUN_USER" "$APP" "$APP/config" "$APP/data" "$APP/
 if [ ! -f "$APP/config/config.yaml" ]; then
   install -m 644 -o "$RUN_USER" -g "$RUN_USER" /opt/wnbase/birdnet-go-config.yaml "$APP/config/config.yaml"
 fi
+# BirdNET-Go's settings behind a password of this Base (reading detections stays open)
+python3 /opt/wnbase/bngauth.py --config "$APP/config/config.yaml" || true
 /opt/wnbase/birdnet-go-unit.sh "$RUN_USER" "$IMAGE" > /etc/systemd/system/birdnet-go.service
 systemctl daemon-reload
 systemctl enable birdnet-go.service >/dev/null 2>&1

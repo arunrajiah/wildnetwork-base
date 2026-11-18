@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Wildlife Network Base SD card image with the official pi-gen (Docker based).
-#   image/build.sh                       result: image/deploy/<date>-wildnetwork-base.img.xz
+#   image/build.sh                       result: image/deploy/<date>-wildnetwork-base.img.xz and its .sha256
 # Needs Docker (privileged containers, loop devices) and about 15 GB of free disk.
 # Options (environment variables):
 #   WN_WIFI_COUNTRY   Wi-Fi regulatory country set in the image, needed for the hotspot (default GB)
@@ -22,6 +22,11 @@ rm -rf "$PIGEN"
 git init -q "$PIGEN"
 git -C "$PIGEN" fetch -q --depth 1 "$PI_GEN_REPO" "$PI_GEN_REF"
 git -C "$PIGEN" checkout -q FETCH_HEAD
+
+# Every file provision.sh installs must be in base/ (the whole folder goes into the image).
+for f in $(sed -n 's/^for f in \(.*\); do$/\1/p' "$ROOT/base/provision.sh"); do
+  [ -f "$ROOT/base/$f" ] || { echo "base/$f is missing"; exit 1; }
+done
 
 # Our stage, with the files it installs. Only stage-wildnetwork is exported as an image.
 cp -R "$HERE/stage-wildnetwork" "$STAGE"
@@ -66,5 +71,6 @@ say "Build took $(( ($(date +%s) - start) / 60 )) minutes"
 mkdir -p "$HERE/deploy"
 find "$PIGEN/deploy" -maxdepth 1 -type f \( -name '*.img.xz' -o -name '*.log' -o -name '*.info' -o -name '*.json.xz' \) \
   -exec mv {} "$HERE/deploy/" \;
+(cd "$HERE/deploy" && for img in *.img.xz; do sha256sum "$img" > "$img.sha256"; done)
 [ "${WN_KEEP_PIGEN:-0}" = 1 ] || rm -rf "$PIGEN"
 ls -lh "$HERE/deploy"

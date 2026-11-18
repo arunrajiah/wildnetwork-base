@@ -20,7 +20,8 @@ Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger micro
 
 ## Flash an SD card
 
-1. Download the newest `wildnetwork-base` `.img.xz` from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases).
+1. Download the newest `wildnetwork-base` `.img.xz` from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases), and the `.img.xz.sha256` file next to it.
+   Check that the download is complete and unchanged: in the folder with both files run `sha256sum -c *.img.xz.sha256` (Linux), `shasum -a 256 -c *.img.xz.sha256` (macOS) or, in PowerShell, `Get-FileHash .\<file>.img.xz` and compare the result with the text in the `.sha256` file (Windows). It must say `OK` or match exactly; otherwise download again.
 2. Open Raspberry Pi Imager, choose your Raspberry Pi model, then **Operating System > Use custom** and pick the downloaded file. Skip Imager's OS customisation: this image does not use it.
 3. Optional, for SSH: after flashing, open the card's boot partition (called `bootfs`) on your computer and add a file named `wildnetwork-ssh.pub` with your SSH public key(s), one per line.
 4. Put the card in the Base and power it on. The first boot takes about 2 minutes (it grows the file system to fill the card and loads BirdNET-Go).
@@ -48,7 +49,8 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 1. the setup code from the label;
 2. a name for the station and its location (type the coordinates, or tap **Use this phone's location**; some phone browsers only share the location on secure pages, so typing always works);
-3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out.
+3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out;
+4. optional: tick **Test station** while you try the Base out (on a table, at home). Its detections are then kept apart and not shown on the public map, and the dashboard says "Test station, not on the public map". Untick it once the Base is in its real place.
 
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
@@ -68,10 +70,17 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 ## Security notes
 
 - The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
+- They are also written to `wildnetwork-setup.txt` on the boot partition, by the first boot of the image and by every run of `install.sh` on a stock Raspberry Pi, so a Base whose label is lost can still be set up. Anyone who can take the SD card out can read that file (and the whole card), so keep the Base closed and the card inside. Delete the file if you prefer: it is not needed to run the Base, and `install.sh` writes it again when run again. The install log `/var/log/wnbase-install.log` holds the same details and is readable by the Base's user and root.
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
+- Health reports (see [Health reports](#health-reports)) carry no audio, no detections and no location.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
+- **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
+
+  What stays open on the network (no login), as BirdNET-Go 20260823 decides: its dashboard pages, `GET /api/v2/detections`, `/api/v2/detections/recent`, `/api/v2/detections/<id>` and the other read-only views (species, statistics, clips, spectrograms), so apps that read detections, such as BirdEcho, work as before at `http://<base>:8080`.
+  What needs the login: all settings (`/api/v2/settings`), control actions (`/api/v2/control/...`: restart, reload model), and changes to detections (delete, review, lock, ignore species, batch actions).
+  The wnbase dashboard and API on port 80 are separate and work as described above.
 
 ## Install on a stock Raspberry Pi
 
@@ -86,13 +95,41 @@ The installer:
 
 - installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
 - installs wdx-agent from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
-- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
+- installs BirdNET-Go with its official installer (the one from the pinned release's tag, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
 - sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
 - installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
-- prints the hotspot name, its password and the setup code.
+- prints the hotspot name, its password and the setup code;
+- writes everything it prints to `/var/log/wnbase-install.log` (appended on every run, readable by the Base's user without sudo) and prints that path at the end, also when it stops with an error.
 
-It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
+It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default: the release pinned in `image/VERSIONS`, the same as the SD card image, currently `20260823`; `latest` takes BirdNET-Go's newest, whose database layout wdx-agent may not know yet), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing), `WN_INSTALL_LOG`.
+
+### One command, or no keyboard at all
+
+**One command** on the Pi (over SSH, as the user made in Imager), instead of copying the repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arunrajiah/wildnetwork-base/main/bootstrap.sh | sudo bash
+```
+
+`bootstrap.sh` clones this repository to `/opt/wnbase-src` (branch or tag `WN_REF`, default `main`) and runs `install.sh` from it.
+
+**No keyboard, no SSH:** flash, power on, and the Base installs itself.
+
+1. In Raspberry Pi Imager, choose Raspberry Pi OS Lite (64-bit), and in OS customisation set a user, the Wi-Fi network the Pi will use for the install (it needs internet), the Wi-Fi country and, if you like, SSH with your key.
+2. After writing, open the card's boot partition (`bootfs`) on your computer, open the file `user-data` (Imager wrote it; it is cloud-init settings) in a plain text editor and add, at the end:
+
+   ```yaml
+   runcmd:
+     - [bash, -c, "curl -fsSL https://raw.githubusercontent.com/arunrajiah/wildnetwork-base/main/bootstrap.sh | bash -s -- --service"]
+   ```
+
+   If the file already has a `runcmd:` line, add only the line starting with `-` under it, indented like the lines already there (a second `runcmd:` would replace the first).
+3. Optional: add a file `wildnetwork-firstboot.env` on the boot partition with settings, one `KEY=value` per line: `WN_WIFI_COUNTRY`, `WN_USER`, `WN_REF`, `WN_BASE_URL`, `WN_BIRDNET_VERSION`, `WN_SKIP_BIRDNET`. Other lines are ignored and nothing in it is run.
+4. Put the card in the Pi and power it on. On the first boot cloud-init sets up `wn-install.service`, which waits for the network, runs `install.sh` as root, tries again every 2 minutes if it fails, and disables itself once it has succeeded. That takes about 15 to 30 minutes (BirdNET-Go is a large download).
+5. When it is done, `wildnetwork-setup.txt` on the boot partition has the hotspot name, password and setup code, and the dashboard is at `http://<hostname>.local` on the same Wi-Fi. Progress: `/var/log/wnbase-install.log`, or `journalctl -u wn-install` over SSH.
+
+BirdNET-Go's installer calls `sudo` as the Pi's user, which needs sudo without a password (Raspberry Pi OS normally sets that up for the user made in Imager). If it cannot, the service stops with that reason in the log: run `sudo ./install.sh` from an SSH session with a terminal instead.
 
 ### The microphone
 
@@ -116,9 +153,37 @@ The dashboard shows **No microphone found** when BirdNET-Go's log says it starte
 ./image/build.sh
 ```
 
-This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz`. The `SD card image` GitHub Actions workflow runs the same script when started by hand or when a `v*` tag is pushed, and attaches the image to that tag's release.
+This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz` with its SHA-256 in `*.img.xz.sha256`. The `SD card image` GitHub Actions workflow runs the tests and the same script when started by hand or when a `v*` tag is pushed (for example `git tag v0.2.0 && git push origin v0.2.0`), and attaches the image and its `.sha256` to that tag's release. Everything in `base/`, `systemd/` and `install.sh` at the tagged commit goes into the image, so a release image always has the current microphone choice, checks and services.
 
 The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
+
+### Finding a Base on the network (mDNS)
+
+wnbase advertises itself with avahi as DNS-SD service type **`_wlnw-base._tcp`**, instance name = the host name (for example `wildnetwork-base-ab12`), port = wnbase's port (80), from `/etc/avahi/services/wlnw-base.service`. TXT records:
+
+| Key | Value |
+| --- | --- |
+| `name` | station name from Setup (the host name until one is set), at most 64 characters |
+| `model` | `wildnetwork-base` |
+| `version` | wnbase version |
+| `hw` | hardware id (Raspberry Pi serial number), the same as `hardwareId` in `/api/info` |
+| `path` | `/api/info` |
+| `test` | `yes` for a test station, else `no` |
+
+The file is rewritten when the name or test mode changes. Look for it with `avahi-browse -rt _wlnw-base._tcp` (Linux) or `dns-sd -B _wlnw-base._tcp` (macOS). BirdNET-Go itself is on port 8080 of the same host.
+
+### Health reports
+
+Every 15 minutes (first one a minute after start) wnbase sends `POST <site>/api/v1/devices/<deviceId>/health` with the device key (`Authorization: Bearer`), once the Base is registered:
+
+```json
+{"at": "2026-11-19T06:00:00Z", "software": {"wnbase": "0.1.0", "wdx-agent": "0.4.4", "birdnet-go": "20260823"},
+ "uptimeSeconds": 86400, "boots": 3, "temperatureC": 48.2, "storage": {"freeMb": 21000, "totalMb": 31000},
+ "microphone": {"active": true, "lastDetectionAt": "2026-11-19T05:58:12Z"}, "queue": {"pending": 0},
+ "network": {"type": "wifi", "signal": 67, "signalUnit": "percent"}}
+```
+
+`boots` is counted by wnbase (`/var/lib/wnbase/boots.json`). `microphone.active` is `microphone.found` of `/api/info`; `lastDetectionAt` is the newest detection of the last 7 days, or null. `network` is left out when the Base has no uplink; `signal` is the Wi-Fi or 4G signal in percent (from NetworkManager or ModemManager) and is left out for Ethernet. There is no audio, no detection content and no location in it. While the Base is offline or not registered, reports wait in `/var/lib/wnbase/health-queue.json` (at most 96, one day; older ones are dropped) and are sent together as a JSON array once it is back.
 
 ### Local API
 
@@ -133,10 +198,11 @@ No code needed.
  "software": {"wnbase": "0.1.0", "wdx-agent": "0.3.0", "birdnetGo": "latest"},
  "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
  "registration": "registered",
- "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null}}
+ "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null},
+ "test": false}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `test` is true for a test station (see `POST /api/config`). `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -147,8 +213,10 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 ```json
 {"name": "Hill top", "latitude": 51.5, "longitude": -0.12, "roundCoords": 2,
  "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wlnw.org/api/v1/events",
- "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}}
+ "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false}
 ```
+
+`test` (default off) makes this a **test station**: `test = yes` in `/etc/wdx-agent.ini`, so wdx-agent (0.4.4 or later) adds the top-level field `"test": true` to every event, and Wildlife Network keeps those events apart and never shows them publicly. Each change is also sent to Wildlife Network as `POST <site>/api/v1/devices/<deviceId>/settings` with `{"test": true|false}` and the device key (`Authorization: Bearer`). It waits in `/var/lib/wnbase/pending-settings.json` while the Base is offline or not registered yet, and is retried every 2 minutes until it is accepted.
 
 Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new `latitude`/`longitude` is also written, unrounded, into BirdNET-Go's `config.yaml` (only the `latitude` and `longitude` keys directly under `birdnet:` change; the rest of the file is kept as it was), and the `birdnet-go` container is restarted, so BirdNET-Go's species range filter uses the real location. At 0,0 it would accept species that do not occur there. The exact location stays on the device; `roundCoords` only applies to what wdx-agent uploads. `apn` creates or updates the NetworkManager connection `wn-4g`; `wifi` saves the connection `wn-uplink`, which is used the next time the radio is free. Response:
 
@@ -183,6 +251,10 @@ Up to N (default and maximum 500) WDX events not yet uploaded, and the cursor to
 
 `cursor` is null and `events` empty when nothing is waiting. The cursor can also cover skipped rows (low confidence, noise), so a batch can have a cursor and no events: acknowledge it anyway.
 
+#### POST /api/birdnet-go-password
+
+Header `X-Setup-Code`. Returns the password of BirdNET-Go's settings page made by this Base, `{"password": "...", "url": ":8080"}`, or `404` when BirdNET-Go has a password set by its owner instead.
+
 #### POST /api/ack
 
 Header `X-Setup-Code`. Body `{"cursor": <cursor from the last /api/detections response>}`. Response `{"ok": true, "advanced": true}`. Any other cursor is refused with `409`.
@@ -212,8 +284,10 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
+| `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
 | `base/mic.py` | Picks BirdNET-Go's microphone (`/opt/wnbase/mic.py`); also used by wnbase for the microphone check |
 | `base/birdnet-go-check.sh` | Checks that BirdNET-Go's installer finished (used by `install.sh`) |
+| `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
 | `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
 | `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |

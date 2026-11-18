@@ -53,6 +53,8 @@ MAX_BODY = 64 * 1024
 RECENT_MAX = 200
 REGISTER_EVERY = 300        # seconds between registration checks
 REGISTER_MAX_BACKOFF = 3600
+HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
+HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
 # BirdNET-Go log lines (lowercase) that tell whether it records: the newest one wins
 MIC_LOG_BAD = ("starting without active audio sources", "audio card capture failed")
@@ -94,6 +96,9 @@ class Config:
         self.birdnet_config = g(w, "birdnet_config", "")  # empty: ../config/config.yaml from the database folder
         self.birdnet_container = g(w, "birdnet_container", "birdnet-go")
         self.setup_code_file = g(w, "setup_code_file", "/etc/wnbase/setup-code")
+        self.state_dir = g(w, "state_dir", "/var/lib/wnbase")
+        self.avahi_service_file = g(w, "avahi_service_file", "/etc/avahi/services/wlnw-base.service")
+        self.birdnet_password_file = g(w, "birdnet_password_file", "/etc/wnbase/birdnet-go-password")   # queued messages for Wildlife Network
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
         self.hotspot_force = g(h, "force", "no").lower() in ("1", "yes", "true", "on")
@@ -242,10 +247,25 @@ def set_yaml_keys(text: str, section: str, values: dict[str, str]) -> tuple[str,
     return "".join(lines), found
 
 
-def http_post_json(url: str, body: dict, timeout: int = 30) -> tuple[int, dict]:
+MDNS_TYPE = "_wlnw-base._tcp"
+
+
+def avahi_service_xml(port: int, txt: dict[str, str]) -> str:
+    """Avahi service file advertising wnbase as _wlnw-base._tcp, named after the host, with TXT records."""
+    from xml.sax.saxutils import escape
+    records = "".join(f"    <txt-record>{escape(k)}={escape(v)}</txt-record>\n" for k, v in txt.items())
+    return ('<?xml version="1.0" standalone="no"?>\n<!DOCTYPE service-group SYSTEM "avahi-service.dtd">\n'
+            "<!-- Written by wnbase; rewritten when the station name changes -->\n<service-group>\n"
+            '  <name replace-wildcards="yes">%h</name>\n  <service>\n'
+            f"    <type>{MDNS_TYPE}</type>\n    <port>{int(port)}</port>\n{records}  </service>\n</service-group>\n")
+
+
+def http_post_json(url: str, body, timeout: int = 30, token: str | None = None) -> tuple[int, dict]:
     """POST JSON, return (status, JSON body or {}). Network problems raise OSError (URLError is one)."""
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
-        "content-type": "application/json", "user-agent": f"wnbase/{VERSION}"})
+    headers = {"content-type": "application/json", "user-agent": f"wnbase/{VERSION}"}
+    if token:
+        headers["authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             status, raw = r.status, r.read()
@@ -438,9 +458,220 @@ class App:
             "longitude": s.longitude if s else None,
             "registration": "registered" if s and s.api_key else self.registration,
             "microphone": self.microphone(),
+            "test": self.test_mode(),
         }
 
     # --- registration with Wildlife Network -------------------------------------------------------------------
+
+    def agent_ini(self) -> configparser.SectionProxy | dict:
+        """The [agent] section as written (read directly, so keys an older wdx-agent ignores are seen too)."""
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.cfg.agent_config)
+        return cp["agent"] if cp.has_section("agent") else {}
+
+    def test_mode(self) -> bool:
+        return str(self.agent_ini().get("test", "")).strip().lower() in ("1", "yes", "true", "on")
+
+    def api_base(self, s) -> str:
+        return s.endpoint.split("/api/", 1)[0]
+
+    def pending_settings_path(self) -> str:
+        return os.path.join(self.cfg.state_dir, "pending-settings.json")
+
+    def sync_settings(self) -> bool:
+        """Send device settings waiting in the queue (test mode) to Wildlife Network. True when none are left.
+
+        POST <site>/api/v1/devices/<deviceId>/settings with the device key. Kept on disk until it is accepted,
+        so a Base that is offline when the owner changes it sends it later."""
+        path = self.pending_settings_path()
+        try:
+            pending = json.loads(Path(path).read_text())
+        except (OSError, ValueError):
+            return True
+        try:
+            s = self.settings()
+        except ApiError:
+            return False
+        if not s.api_key or not s.device_id:
+            return False   # not registered yet: sent once it is
+        url = f"{self.api_base(s)}/api/v1/devices/{quote(s.device_id, safe='')}/settings"
+        try:
+            status, res = self.http_post(url, pending, 30, token=s.api_key)
+        except (OSError, ValueError) as e:
+            log(f"device settings not sent yet ({type(e).__name__}); will retry")
+            return False
+        if status in (200, 201, 204):
+            with self.lock:
+                try:
+                    if json.loads(Path(path).read_text()) == pending:   # not changed again meanwhile
+                        os.unlink(path)
+                except (OSError, ValueError):
+                    pass
+            log(f"device settings sent to Wildlife Network: {json.dumps(pending)}")
+            return True
+        log(f"device settings refused (HTTP {status}: {str(res.get('error') or '')[:120]}); will retry")
+        return False
+
+    def queue_settings(self, values: dict) -> None:
+        path = self.pending_settings_path()
+        with self.lock:
+            try:
+                pending = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                pending = {}
+            pending.update(values)
+            os.makedirs(self.cfg.state_dir, exist_ok=True)
+            write_atomic(path, json.dumps(pending).encode(), 0o600)
+
+    # --- health reports to Wildlife Network ---------------------------------------------------------------
+
+    def boots(self) -> int | None:
+        """How many times this Base has started, counted by wnbase from the kernel's boot id."""
+        try:
+            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        except OSError:
+            return None
+        path = os.path.join(self.cfg.state_dir, "boots.json")
+        with self.lock:
+            try:
+                st = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                st = {"count": 0, "bootId": None}
+            if st.get("bootId") != boot_id:
+                st = {"count": int(st.get("count") or 0) + 1, "bootId": boot_id}
+                try:
+                    os.makedirs(self.cfg.state_dir, exist_ok=True)
+                    write_atomic(path, json.dumps(st).encode(), 0o644)
+                except OSError:
+                    pass
+        return st["count"]
+
+    def wifi_signal(self) -> int | None:
+        rc, out = self.run(["nmcli", "-t", "-f", "ACTIVE,SIGNAL", "device", "wifi", "list", "--rescan", "no"], 15)
+        if rc == 0:
+            for line in out.splitlines():
+                f = nmcli_fields(line)
+                if len(f) >= 2 and f[0] == "yes" and f[1].isdigit():
+                    return int(f[1])
+        return None
+
+    def health(self) -> dict:
+        """One health report: versions, uptime, boots, temperature, storage, microphone, queue and network.
+        No audio, no detections, no location."""
+        rec: dict = {"at": iso_utc(time.time()),
+                     "software": {"wnbase": VERSION, "wdx-agent": getattr(self.agent, "VERSION", None),
+                                  "birdnet-go": self.birdnet_go_version()}}
+        st: dict = {}
+        try:
+            s = self.settings()
+            st = self.agent.collect_status(s)
+        except (ApiError, SystemExit, OSError, sqlite3.Error):
+            s = None
+        try:
+            rec["uptimeSeconds"] = int(float(Path("/proc/uptime").read_text().split()[0]))
+        except (OSError, ValueError, IndexError):
+            pass
+        boots = self.boots()
+        if boots is not None:
+            rec["boots"] = boots
+        for key in ("temperatureC", "storage", "queue"):
+            if key in st:
+                rec[key] = st[key]
+        last = None
+        if s is not None:
+            try:
+                rows = self.recent(168)["detections"]
+                last = rows[0]["time"] if rows else None
+            except ApiError:
+                pass
+        rec["microphone"] = {"active": self.microphone().get("found") is True, "lastDetectionAt": last}
+        net = self.network()
+        kind = net.get("uplink")
+        if kind:
+            n: dict = {"type": kind}
+            sig = (net.get("cellular") or {}).get("signalPercent") if kind == "4g" else \
+                self.wifi_signal() if kind == "wifi" else None
+            if sig is not None:
+                n["signal"], n["signalUnit"] = sig, "percent"
+            rec["network"] = n
+        return rec
+
+    def health_queue_path(self) -> str:
+        return os.path.join(self.cfg.state_dir, "health-queue.json")
+
+    def send_health(self, rec: dict | None = None) -> bool:
+        """Queue a report (a new one unless given) and send everything queued. True when the queue is empty.
+
+        POST <site>/api/v1/devices/<deviceId>/health with the device key: one object, or an array of them when
+        older reports were waiting. At most HEALTH_QUEUE_MAX are kept; the oldest go first."""
+        rec = rec if rec is not None else self.health()
+        path = self.health_queue_path()
+        with self.lock:
+            try:
+                queue = json.loads(Path(path).read_text())
+                queue = queue if isinstance(queue, list) else []
+            except (OSError, ValueError):
+                queue = []
+            queue = (queue + [rec])[-HEALTH_QUEUE_MAX:]
+            os.makedirs(self.cfg.state_dir, exist_ok=True)
+            write_atomic(path, json.dumps(queue).encode(), 0o600)
+        try:
+            s = self.settings()
+        except ApiError:
+            return False
+        if not s.api_key or not s.device_id:
+            return False
+        url = f"{self.api_base(s)}/api/v1/devices/{quote(s.device_id, safe='')}/health"
+        try:
+            status, res = self.http_post(url, queue if len(queue) > 1 else queue[0], 30, token=s.api_key)
+        except (OSError, ValueError) as e:
+            log(f"health report kept for later ({len(queue)} waiting; {type(e).__name__})")
+            return False
+        if status not in (200, 201, 202, 204):
+            log(f"health report refused (HTTP {status}: {str(res.get('error') or '')[:120]}); {len(queue)} waiting")
+            return False
+        with self.lock:
+            try:
+                now = json.loads(Path(path).read_text())
+                rest = now[len(queue):] if isinstance(now, list) and now[:len(queue)] == queue else []
+                write_atomic(path, json.dumps(rest).encode(), 0o600)
+            except (OSError, ValueError):
+                pass
+        return True
+
+    def start_health(self) -> None:
+        def loop():
+            time.sleep(60)   # let BirdNET-Go and the network come up first
+            while True:
+                try:
+                    self.send_health()
+                except Exception:
+                    log(f"health report error:\n{traceback.format_exc()}")
+                time.sleep(HEALTH_EVERY)
+        threading.Thread(target=loop, name="health", daemon=True).start()
+
+    def mdns_txt(self) -> dict[str, str]:
+        name = str(self.agent_ini().get("station_name", "") or "").strip() or socket.gethostname()
+        # TXT strings are at most 255 bytes each; names are at most 64 characters here
+        return {"name": name[:64], "model": "wildnetwork-base", "version": VERSION, "hw": self.hw,
+                "path": "/api/info", "test": "yes" if self.test_mode() else "no"}
+
+    def write_mdns(self) -> None:
+        """Advertise wnbase over mDNS/DNS-SD (avahi picks up a changed file by itself)."""
+        path = self.cfg.avahi_service_file
+        if not path or not os.path.isdir(os.path.dirname(path)):
+            return
+        data = avahi_service_xml(self.cfg.port, self.mdns_txt()).encode()
+        try:
+            if Path(path).read_bytes() == data:
+                return
+        except OSError:
+            pass
+        try:
+            write_atomic(path, data, 0o644)
+            log(f"mDNS: advertising {MDNS_TYPE} on port {self.cfg.port}")
+        except OSError as e:
+            log(f"mDNS service file not written: {e}")
 
     def register_once(self) -> int:
         """One registration attempt when the Base is set up but has no key. Returns seconds until the next check."""
@@ -498,12 +729,17 @@ class App:
                 except Exception:
                     log(f"registration error:\n{traceback.format_exc()}")
                     wait = REGISTER_MAX_BACKOFF
+                try:
+                    if not self.sync_settings():
+                        wait = min(wait, 120)
+                except Exception:
+                    log(f"device settings error:\n{traceback.format_exc()}")
                 self.reg_wake.wait(wait)
                 self.reg_wake.clear()
         threading.Thread(target=loop, name="registration", daemon=True).start()
 
     def configure(self, body: dict) -> dict:
-        allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi"}
+        allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test"}
         unknown = set(body) - allowed
         if unknown:
             raise ApiError(400, f"unknown field: {sorted(unknown)[0]}")
@@ -543,6 +779,13 @@ class App:
             updates["sensor_model"] = "Wildlife Network Base"
         if "endpoint" in body:
             updates["endpoint"] = text("endpoint", r"https?://[\x21-\x7e]+", 300)
+        test = None
+        if "test" in body:
+            if not isinstance(body["test"], bool):
+                raise ApiError(400, "invalid test: true or false")
+            test = body["test"]
+            if test != self.test_mode():
+                updates["test"] = "yes" if test else "no"
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
         wifi = body.get("wifi")
         if wifi is not None:
@@ -560,6 +803,17 @@ class App:
             warnings += self.set_apn(apn)
         if wifi is not None:
             warnings += self.set_wifi(wifi["ssid"], wifi["psk"])
+        if "station_name" in updates or "test" in updates:
+            self.write_mdns()
+        if "test" in updates:
+            # The server keeps a test station apart too (also for events an older wdx-agent sends without the
+            # flag); queued, so it is sent when the Base is online and registered.
+            self.queue_settings({"test": test})
+            log(f"test station {'on' if test else 'off'}")
+            agent_version = str(getattr(self.agent, "VERSION", "0"))
+            if test and self.agent_older_than(agent_version, "0.4.4"):
+                warnings.append(f"wdx-agent {agent_version} does not mark events as test; update it (run install.sh again). "
+                                "Wildlife Network is told about the test station separately.")
         notes: list[str] = []
         if "latitude" in updates or "longitude" in updates:
             notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"))
@@ -579,6 +833,22 @@ class App:
         if notes:
             res["notes"] = notes
         return res
+
+    @staticmethod
+    def agent_older_than(version: str, wanted: str) -> bool:
+        def parts(v):
+            return tuple(int(x) if x.isdigit() else 0 for x in v.split("."))
+        return parts(version) < parts(wanted)
+
+    def birdnet_password(self) -> dict:
+        """BirdNET-Go's settings password made by this Base (bngauth.py), for the owner who has the setup code."""
+        try:
+            pw = Path(self.cfg.birdnet_password_file).read_text().strip()
+        except OSError:
+            pw = ""
+        if not pw:
+            raise ApiError(404, "no BirdNET-Go password made by this Base (it may have been set in BirdNET-Go)")
+        return {"password": pw, "url": ":8080"}
 
     def connection_exists(self, name: str) -> bool:
         rc, out = self.run(["nmcli", "-t", "-f", "NAME", "connection", "show"], 15)
@@ -813,11 +1083,13 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.msg{margin-top:10px;font-size:.9rem}.err{color:var(--bad)}.okc{color:var(--accent)}
 .empty{color:var(--dim);padding:14px 4px}h3{font-size:.95rem;margin:18px 0 0}details.adv{background:none;border:0;padding:0;margin-top:14px}
 .reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}.reg.bad{color:var(--bad);font-weight:600}
+label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(--text)}label.chk input{width:auto;margin:3px 0 0}
 </style></head><body><main>
 <header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">Wildlife Network Base</h1><span id="dot" class="dot" title="Health"></span></header>
 <div class="sub" id="hw"></div>
 <p class="reg" id="reg"></p>
 <p class="reg bad" id="mic" hidden></p>
+<p class="reg wait" id="test" hidden>Test station, not on the public map</p>
 <h2>Health</h2>
 <div class="grid" id="health"></div>
 <div class="msg err" id="err"></div>
@@ -834,12 +1106,14 @@ input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px 
 <p class="sub">Fill in one of these, or neither if a phone will carry the data out.</p>
 <label>4G: APN from your SIM provider<input id="f-apn" spellcheck="false" placeholder="for example internet"></label>
 <div class="row"><label>Wi-Fi network<input id="f-ssid" spellcheck="false"></label><label>Wi-Fi password<input id="f-psk" type="password"></label></div>
+<label class="chk"><input type="checkbox" id="f-test"> Test station: detections are kept apart and not shown on the public map. Turn it off when the Base is in its real place.</label>
 <details class="adv"><summary>Advanced</summary>
 <p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from Wildlife Network.</p>
 <label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
 </details>
-<p><button class="primary" type="submit">Save</button></p>
+<p><button class="primary" type="submit">Save</button> <button type="button" id="bngpw">Show BirdNET-Go password</button></p>
+<p class="sub" id="bngmsg"></p>
 <div class="msg" id="fmsg"></div>
 </form></details>
 <p class="sub" id="foot"></p>
@@ -855,11 +1129,11 @@ async function loadInfo(){const i=await j('/api/info');$('name').textContent=i.n
 const reg=i.registration||'';const rp=$('reg');
 rp.className='reg '+(reg==='registered'?'ok':'wait');
 rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting-for-internet'?'Will connect to Wildlife Network when the Base has internet':reg==='waiting-for-setup'?'Will connect to Wildlife Network once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to Wildlife Network yet ('+reg.slice(7)+'). It keeps trying.':'';
-const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
+$('test').hidden=!i.test;const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
 $('mic').textContent=mc.found===false?'No microphone found. '+(mc.problem||'')+' Plug a USB microphone into the Base, then restart it.':'';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 $('foot').textContent='wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
-if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';if(!i.configured)$('setup').open=true}}
+if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';$('f-test').checked=!!i.test;if(!i.configured)$('setup').open=true}}
 async function loadStatus(){const s=await j('/api/status');const h=$('health');h.replaceChildren();
 const b=s.battery;h.append(tile('Battery',b&&b.percent!=null?b.percent+'%'+(b.charging?' (charging)':''):'n/a'));
 h.append(tile('Storage free',s.storage?(s.storage.freeMb/1000).toFixed(1)+' GB':'n/a'));
@@ -884,10 +1158,12 @@ $('form').onsubmit=async ev=>{ev.preventDefault();const m=$('fmsg');m.className=
 const v=id=>$(id).value.trim();if(v('f-name'))b.name=v('f-name');
 if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f-lon'))}
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
-if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};
+if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
 m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
+$('bngpw').onclick=async()=>{const m=$('bngmsg');try{const r=await j('/api/birdnet-go-password',{method:'POST',headers:{'x-setup-code':$('f-code').value.trim()}});
+m.textContent='BirdNET-Go settings (port 8080) password: '+r.password}catch(e){m.textContent=e.message}};
 $('geo').onclick=()=>{const g=$('geomsg');
 if(!navigator.geolocation){g.textContent='This browser cannot share its location here. Type the coordinates instead (from a map app).';return}
 g.textContent='Finding location...';navigator.geolocation.getCurrentPosition(p=>{$('f-lat').value=p.coords.latitude.toFixed(5);$('f-lon').value=p.coords.longitude.toFixed(5);g.textContent='Location filled in.'},
@@ -980,6 +1256,9 @@ class Handler(BaseHTTPRequestHandler):
                 if u.path.startswith("/clips/"):
                     return self.send_clip(app.clip_path(u.path[len("/clips/"):]))
             elif method == "POST":
+                if u.path == "/api/birdnet-go-password":
+                    app.check_code(self.client_address[0], self.headers.get("X-Setup-Code") or "")
+                    return self.send_json(app.birdnet_password())
                 if u.path in ("/api/config", "/api/ack"):
                     body = self.read_json()
                     app.check_code(self.client_address[0], self.headers.get("X-Setup-Code") or "")
@@ -1057,7 +1336,9 @@ def main() -> None:
                              "1" if cfg.hotspot_force else "0"]))
         return
     app = App(cfg)
+    app.write_mdns()
     app.start_registration()
+    app.start_health()
     srv = make_server(app)
     log(f"wnbase {VERSION} on {cfg.bind}:{cfg.port}, wdx-agent {app.agent.VERSION}, hotspot {hotspot_ssid(cfg, app.hw)}")
     try:
