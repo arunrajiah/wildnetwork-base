@@ -164,6 +164,8 @@ Skip this for an indoor Base.
 | The Pi restarts on its own | Power supply too weak, or the battery is low | Use the official supply. On solar, check the battery voltage and the converter rating. |
 | No detections after playing bird sounds, or **No microphone found** on the dashboard | Microphone not found, the wrong one chosen, or too quiet | Plug the microphone in and restart the Base (the Base picks it up when BirdNET-Go starts). Open http://10.42.0.1:8080 and check the sound level. Try another USB port; unplug other sound devices. See [How the microphone is chosen](#how-the-microphone-is-chosen-and-how-to-change-it). |
 | Many wrong species | The location is not set, or the microphone picks up a lot of noise | Set the location in Setup. Move the Base away from noise. |
+| Installed on Raspberry Pi OS, but no hotspot, no dashboard or no BirdNET-Go | The install stopped early | Read `/var/log/wnbase-install.log` (over SSH, no sudo needed). It ends with the reason and the command to run again. |
+| Label lost | | Put the SD card in a computer and open `wildnetwork-setup.txt` on its `bootfs` drive. |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
 | "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
 | Hot Base, slow detections in summer | Overheating | Add shade, a fan case or a bigger heatsink; move the box out of direct sun. |
