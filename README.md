@@ -96,6 +96,33 @@ The installer:
 
 It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default: the release pinned in `image/VERSIONS`, the same as the SD card image, currently `20260823`; `latest` takes BirdNET-Go's newest, whose database layout wdx-agent may not know yet), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing), `WN_INSTALL_LOG`.
 
+### One command, or no keyboard at all
+
+**One command** on the Pi (over SSH, as the user made in Imager), instead of copying the repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arunrajiah/wildnetwork-base/main/bootstrap.sh | sudo bash
+```
+
+`bootstrap.sh` clones this repository to `/opt/wnbase-src` (branch or tag `WN_REF`, default `main`) and runs `install.sh` from it.
+
+**No keyboard, no SSH:** flash, power on, and the Base installs itself.
+
+1. In Raspberry Pi Imager, choose Raspberry Pi OS Lite (64-bit), and in OS customisation set a user, the Wi-Fi network the Pi will use for the install (it needs internet), the Wi-Fi country and, if you like, SSH with your key.
+2. After writing, open the card's boot partition (`bootfs`) on your computer, open the file `user-data` (Imager wrote it; it is cloud-init settings) in a plain text editor and add, at the end:
+
+   ```yaml
+   runcmd:
+     - [bash, -c, "curl -fsSL https://raw.githubusercontent.com/arunrajiah/wildnetwork-base/main/bootstrap.sh | bash -s -- --service"]
+   ```
+
+   If the file already has a `runcmd:` line, add only the line starting with `-` under it, indented like the lines already there (a second `runcmd:` would replace the first).
+3. Optional: add a file `wildnetwork-firstboot.env` on the boot partition with settings, one `KEY=value` per line: `WN_WIFI_COUNTRY`, `WN_USER`, `WN_REF`, `WN_BASE_URL`, `WN_BIRDNET_VERSION`, `WN_SKIP_BIRDNET`. Other lines are ignored and nothing in it is run.
+4. Put the card in the Pi and power it on. On the first boot cloud-init sets up `wn-install.service`, which waits for the network, runs `install.sh` as root, tries again every 2 minutes if it fails, and disables itself once it has succeeded. That takes about 15 to 30 minutes (BirdNET-Go is a large download).
+5. When it is done, `wildnetwork-setup.txt` on the boot partition has the hotspot name, password and setup code, and the dashboard is at `http://<hostname>.local` on the same Wi-Fi. Progress: `/var/log/wnbase-install.log`, or `journalctl -u wn-install` over SSH.
+
+BirdNET-Go's installer calls `sudo` as the Pi's user, which needs sudo without a password (Raspberry Pi OS normally sets that up for the user made in Imager). If it cannot, the service stops with that reason in the log: run `sudo ./install.sh` from an SSH session with a terminal instead.
+
 ### The microphone
 
 BirdNET-Go's default audio device is `sysdefault`, which on a Raspberry Pi is the onboard audio (card 0). It cannot record, so BirdNET-Go would start without an audio source. `base/mic.py` fixes that:

@@ -80,6 +80,8 @@ To use a different microphone: open BirdNET-Go's page at http://10.42.0.1:8080, 
 3. Put the microSD card in your computer. In Imager, choose your Raspberry Pi model, then **Operating System > Use custom**, pick the downloaded file, pick the card, and write it. Skip Imager's "OS customisation" step: the Wildlife Network image does not use it.
 4. Optional: to log in over SSH later, open the card's `bootfs` drive and add a file named `wildnetwork-ssh.pub` containing your SSH public key.
 
+**Other option: start from Raspberry Pi OS.** Flash Raspberry Pi OS Lite (64-bit) with Imager instead and add the Base software, either with one command over SSH or with no keyboard at all (a line added to the card's `user-data` file). See [One command, or no keyboard at all](../README.md#one-command-or-no-keyboard-at-all). The result is the same Base; the setup details are then in `wildnetwork-setup.txt` on the card's `bootfs` drive.
+
 ## 3. Test it on a table first
 
 Always test indoors before you climb a pole.

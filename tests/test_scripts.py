@@ -26,9 +26,33 @@ class SetupFile(unittest.TestCase):
         self.assertIn("not written", r.stdout)
 
 
+class Bootstrap(unittest.TestCase):
+    def test_firstboot_env_only_known_keys(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d, "wildnetwork-firstboot.env")
+            marker = Path(d, "ran")
+            env.write_text(f"# settings\nWN_WIFI_COUNTRY=IN\r\nWN_REF=\"v0.2.0\"\nEVIL=$(touch {marker})\n"
+                           f"WN_USER='pi'\nPATH=/nowhere\n")
+            clean = {k: v for k, v in os.environ.items() if not k.startswith("WN_")}
+            r = subprocess.run(["bash", str(ROOT / "bootstrap.sh"), "--print-env", str(env)],
+                               capture_output=True, text=True, check=True, env=clean)
+            self.assertEqual(sorted(x for x in r.stdout.splitlines() if x.startswith("WN_")),
+                             ["WN_REF=v0.2.0", "WN_USER=pi", "WN_WIFI_COUNTRY=IN"])
+            self.assertIn("ignoring unknown setting EVIL", r.stdout)
+            self.assertFalse(marker.exists())
+
+    def test_environment_wins_over_the_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d, "e.env")
+            env.write_text("WN_WIFI_COUNTRY=IN\n")
+            r = subprocess.run(["bash", str(ROOT / "bootstrap.sh"), "--print-env", str(env)],
+                               capture_output=True, text=True, check=True, env=dict(os.environ, WN_WIFI_COUNTRY="GB"))
+            self.assertIn("WN_WIFI_COUNTRY=GB", r.stdout)
+
+
 class InstallScript(unittest.TestCase):
     def test_syntax(self):
-        for f in ["install.sh", *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "base").glob("*.sh"))]:
+        for f in ["install.sh", "bootstrap.sh", *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "base").glob("*.sh"))]:
             subprocess.run(["bash", "-n", str(ROOT / f)], check=True)
 
     def test_pinned_birdnet_go_version(self):
