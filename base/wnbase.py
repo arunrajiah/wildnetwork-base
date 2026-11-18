@@ -97,6 +97,7 @@ class Config:
         self.birdnet_container = g(w, "birdnet_container", "birdnet-go")
         self.setup_code_file = g(w, "setup_code_file", "/etc/wnbase/setup-code")
         self.state_dir = g(w, "state_dir", "/var/lib/wnbase")
+        self.avahi_service_file = g(w, "avahi_service_file", "/etc/avahi/services/wlnw-base.service")
         self.birdnet_password_file = g(w, "birdnet_password_file", "/etc/wnbase/birdnet-go-password")   # queued messages for Wildlife Network
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
@@ -244,6 +245,19 @@ def set_yaml_keys(text: str, section: str, values: dict[str, str]) -> tuple[str,
             lines[n] = m.group(1) + m.group(2) + m.group(3) + values[m.group(2)] + (m.group(5) or "") + m.group(6)
             found.add(m.group(2))
     return "".join(lines), found
+
+
+MDNS_TYPE = "_wlnw-base._tcp"
+
+
+def avahi_service_xml(port: int, txt: dict[str, str]) -> str:
+    """Avahi service file advertising wnbase as _wlnw-base._tcp, named after the host, with TXT records."""
+    from xml.sax.saxutils import escape
+    records = "".join(f"    <txt-record>{escape(k)}={escape(v)}</txt-record>\n" for k, v in txt.items())
+    return ('<?xml version="1.0" standalone="no"?>\n<!DOCTYPE service-group SYSTEM "avahi-service.dtd">\n'
+            "<!-- Written by wnbase; rewritten when the station name changes -->\n<service-group>\n"
+            '  <name replace-wildcards="yes">%h</name>\n  <service>\n'
+            f"    <type>{MDNS_TYPE}</type>\n    <port>{int(port)}</port>\n{records}  </service>\n</service-group>\n")
 
 
 def http_post_json(url: str, body, timeout: int = 30, token: str | None = None) -> tuple[int, dict]:
@@ -636,6 +650,29 @@ class App:
                 time.sleep(HEALTH_EVERY)
         threading.Thread(target=loop, name="health", daemon=True).start()
 
+    def mdns_txt(self) -> dict[str, str]:
+        name = str(self.agent_ini().get("station_name", "") or "").strip() or socket.gethostname()
+        # TXT strings are at most 255 bytes each; names are at most 64 characters here
+        return {"name": name[:64], "model": "wildnetwork-base", "version": VERSION, "hw": self.hw,
+                "path": "/api/info", "test": "yes" if self.test_mode() else "no"}
+
+    def write_mdns(self) -> None:
+        """Advertise wnbase over mDNS/DNS-SD (avahi picks up a changed file by itself)."""
+        path = self.cfg.avahi_service_file
+        if not path or not os.path.isdir(os.path.dirname(path)):
+            return
+        data = avahi_service_xml(self.cfg.port, self.mdns_txt()).encode()
+        try:
+            if Path(path).read_bytes() == data:
+                return
+        except OSError:
+            pass
+        try:
+            write_atomic(path, data, 0o644)
+            log(f"mDNS: advertising {MDNS_TYPE} on port {self.cfg.port}")
+        except OSError as e:
+            log(f"mDNS service file not written: {e}")
+
     def register_once(self) -> int:
         """One registration attempt when the Base is set up but has no key. Returns seconds until the next check."""
         try:
@@ -766,6 +803,8 @@ class App:
             warnings += self.set_apn(apn)
         if wifi is not None:
             warnings += self.set_wifi(wifi["ssid"], wifi["psk"])
+        if "station_name" in updates or "test" in updates:
+            self.write_mdns()
         if "test" in updates:
             # The server keeps a test station apart too (also for events an older wdx-agent sends without the
             # flag); queued, so it is sent when the Base is online and registered.
@@ -1297,6 +1336,7 @@ def main() -> None:
                              "1" if cfg.hotspot_force else "0"]))
         return
     app = App(cfg)
+    app.write_mdns()
     app.start_registration()
     app.start_health()
     srv = make_server(app)

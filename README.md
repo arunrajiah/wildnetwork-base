@@ -157,6 +157,21 @@ This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the com
 
 The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
 
+### Finding a Base on the network (mDNS)
+
+wnbase advertises itself with avahi as DNS-SD service type **`_wlnw-base._tcp`**, instance name = the host name (for example `wildnetwork-base-ab12`), port = wnbase's port (80), from `/etc/avahi/services/wlnw-base.service`. TXT records:
+
+| Key | Value |
+| --- | --- |
+| `name` | station name from Setup (the host name until one is set), at most 64 characters |
+| `model` | `wildnetwork-base` |
+| `version` | wnbase version |
+| `hw` | hardware id (Raspberry Pi serial number), the same as `hardwareId` in `/api/info` |
+| `path` | `/api/info` |
+| `test` | `yes` for a test station, else `no` |
+
+The file is rewritten when the name or test mode changes. Look for it with `avahi-browse -rt _wlnw-base._tcp` (Linux) or `dns-sd -B _wlnw-base._tcp` (macOS). BirdNET-Go itself is on port 8080 of the same host.
+
 ### Health reports
 
 Every 15 minutes (first one a minute after start) wnbase sends `POST <site>/api/v1/devices/<deviceId>/health` with the device key (`Authorization: Bearer`), once the Base is registered:

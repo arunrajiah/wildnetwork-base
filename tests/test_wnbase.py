@@ -489,3 +489,29 @@ class Health(unittest.TestCase):
         Path(self.ini).write_text(Path(self.ini).read_text().replace("api_key = wn_KEY", "api_key ="))
         self.assertFalse(self.app.send_health({"at": "x"}))
         self.assertEqual(self.posts, [])
+
+
+class Mdns(unittest.TestCase):
+    def test_service_file(self):
+        import xml.etree.ElementTree as ET
+        tmp = tempfile.mkdtemp()
+        ini = f"{tmp}/wdx-agent.ini"
+        Path(ini).write_text(f"[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\n"
+                             f"path = {tmp}/db\nstation_name = Hill <top> & co\n")
+        os.makedirs(f"{tmp}/avahi")
+        cfg = wnbase.Config(None, agent_config=ini, agent_module=AGENT, setup_code_file=f"{tmp}/code",
+                            avahi_service_file=f"{tmp}/avahi/wlnw-base.service", state_dir=f"{tmp}/state")
+        app = wnbase.App(cfg, runner=lambda a, t=30: (127, ""))
+        app.write_mdns()
+        root = ET.fromstring(Path(cfg.avahi_service_file).read_text())
+        svc = root.find("service")
+        self.assertEqual(svc.findtext("type"), "_wlnw-base._tcp")
+        self.assertEqual(svc.findtext("port"), "80")
+        txt = dict(t.text.split("=", 1) for t in svc.findall("txt-record"))
+        self.assertEqual(txt["name"], "Hill <top> & co")
+        self.assertEqual((txt["model"], txt["version"], txt["path"], txt["test"]),
+                         ("wildnetwork-base", wnbase.VERSION, "/api/info", "no"))
+        app.configure({"name": "Ridge"})
+        txt = dict(t.text.split("=", 1) for t in ET.fromstring(Path(cfg.avahi_service_file).read_text())
+                   .find("service").findall("txt-record"))
+        self.assertEqual(txt["name"], "Ridge")
