@@ -20,7 +20,8 @@ Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger micro
 
 ## Flash an SD card
 
-1. Download the newest `wildnetwork-base` `.img.xz` from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases).
+1. Download the newest `wildnetwork-base` `.img.xz` from [Releases](https://github.com/arunrajiah/wildnetwork-base/releases), and the `.img.xz.sha256` file next to it.
+   Check that the download is complete and unchanged: in the folder with both files run `sha256sum -c *.img.xz.sha256` (Linux), `shasum -a 256 -c *.img.xz.sha256` (macOS) or, in PowerShell, `Get-FileHash .\<file>.img.xz` and compare the result with the text in the `.sha256` file (Windows). It must say `OK` or match exactly; otherwise download again.
 2. Open Raspberry Pi Imager, choose your Raspberry Pi model, then **Operating System > Use custom** and pick the downloaded file. Skip Imager's OS customisation: this image does not use it.
 3. Optional, for SSH: after flashing, open the card's boot partition (called `bootfs`) on your computer and add a file named `wildnetwork-ssh.pub` with your SSH public key(s), one per line.
 4. Put the card in the Base and power it on. The first boot takes about 2 minutes (it grows the file system to fill the card and loads BirdNET-Go).
@@ -145,7 +146,7 @@ The dashboard shows **No microphone found** when BirdNET-Go's log says it starte
 ./image/build.sh
 ```
 
-This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz`. The `SD card image` GitHub Actions workflow runs the same script when started by hand or when a `v*` tag is pushed, and attaches the image to that tag's release.
+This uses the official [pi-gen](https://github.com/RPi-Distro/pi-gen) at the commit pinned in `image/VERSIONS` (Raspberry Pi OS Lite, trixie, 64-bit: stages 0 to 2 plus `image/stage-wildnetwork`). It needs Docker with privileged containers and about 15 GB of free disk; `WN_PRUNE_WORK=1` saves about 3 GB. The result is `image/deploy/*.img.xz` with its SHA-256 in `*.img.xz.sha256`. The `SD card image` GitHub Actions workflow runs the tests and the same script when started by hand or when a `v*` tag is pushed (for example `git tag v0.2.0 && git push origin v0.2.0`), and attaches the image and its `.sha256` to that tag's release. Everything in `base/`, `systemd/` and `install.sh` at the tagged commit goes into the image, so a release image always has the current microphone choice, checks and services.
 
 The image stage runs `base/provision.sh --image`, the same steps as `install.sh` without starting anything, then adds the BirdNET-Go arm64 container (downloaded with crane, checked against the pinned digest) for `wn-firstboot.service` to load.
 

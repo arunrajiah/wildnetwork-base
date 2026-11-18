@@ -68,5 +68,22 @@ class InstallScript(unittest.TestCase):
         self.assertIn("/var/log/wnbase-install.log", text)
 
 
+class Image(unittest.TestCase):
+    def test_build_includes_every_installed_file(self):
+        prov = (ROOT / "base" / "provision.sh").read_text()
+        line = next(x for x in prov.splitlines() if x.startswith("for f in ") and x.endswith("; do"))
+        for f in line[len("for f in "):-len("; do")].split():
+            self.assertTrue((ROOT / "base" / f).is_file(), f)
+        self.assertIn("mic.py", line)
+        build = (ROOT / "image" / "build.sh").read_text()
+        self.assertIn('cp -R "$ROOT/base" "$ROOT/systemd" "$ROOT/install.sh"', build)
+        self.assertIn("sha256sum", build)
+
+    def test_release_attaches_checksum(self):
+        wf = (ROOT / ".github" / "workflows" / "image.yml").read_text()
+        self.assertIn('tags: ["v*"]', wf)
+        self.assertIn("image/deploy/*.img.xz.sha256", wf.split("Attach to the release", 1)[1])
+
+
 if __name__ == "__main__":
     unittest.main()
