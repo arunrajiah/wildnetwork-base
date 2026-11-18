@@ -9,6 +9,7 @@
 #   WN_BIRDNET_VERSION   BirdNET-Go release (default: the one pinned in image/VERSIONS, as in the SD card image;
 #                        "latest" takes BirdNET-Go's newest, which wdx-agent may not read yet)
 #   WN_WIFI_COUNTRY      two-letter Wi-Fi country code, needed once for the hotspot (e.g. GB, US, IN)
+#   WN_INSTALL_LOG       install log (default /var/log/wnbase-install.log, appended on every run)
 set -euo pipefail
 
 say() { printf '\033[1;36m%s\033[0m\n' "$*"; }
@@ -23,6 +24,15 @@ if [ -z "$RUN_USER" ] || [ "$RUN_USER" = root ]; then
 fi
 [ -n "$RUN_USER" ] || { echo "No regular user found; set WN_USER"; exit 1; }
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+
+# Everything below also goes to the install log, readable by $RUN_USER (no sudo needed to send it for help).
+LOG="${WN_INSTALL_LOG:-/var/log/wnbase-install.log}"
+touch "$LOG"
+chown "root:$(id -gn "$RUN_USER")" "$LOG"
+chmod 640 "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "=== install.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) ($(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo 'no git'))"
+trap 'echo "Install log: $LOG"' EXIT
 say "Installing the Wildlife Network Base software for user $RUN_USER"
 
 if [ -n "${WN_WIFI_COUNTRY:-}" ] && command -v raspi-config >/dev/null; then
