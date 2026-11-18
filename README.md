@@ -49,7 +49,8 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 1. the setup code from the label;
 2. a name for the station and its location (type the coordinates, or tap **Use this phone's location**; some phone browsers only share the location on secure pages, so typing always works);
-3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out.
+3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out;
+4. optional: tick **Test station** while you try the Base out (on a table, at home). Its detections are then kept apart and not shown on the public map, and the dashboard says "Test station, not on the public map". Untick it once the Base is in its real place.
 
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
@@ -163,10 +164,11 @@ No code needed.
  "software": {"wnbase": "0.1.0", "wdx-agent": "0.3.0", "birdnetGo": "latest"},
  "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
  "registration": "registered",
- "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null}}
+ "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null},
+ "test": false}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `test` is true for a test station (see `POST /api/config`). `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -177,8 +179,10 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 ```json
 {"name": "Hill top", "latitude": 51.5, "longitude": -0.12, "roundCoords": 2,
  "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wlnw.org/api/v1/events",
- "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}}
+ "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false}
 ```
+
+`test` (default off) makes this a **test station**: `test = yes` in `/etc/wdx-agent.ini`, so wdx-agent (0.4.4 or later) adds the top-level field `"test": true` to every event, and Wildlife Network keeps those events apart and never shows them publicly. Each change is also sent to Wildlife Network as `POST <site>/api/v1/devices/<deviceId>/settings` with `{"test": true|false}` and the device key (`Authorization: Bearer`). It waits in `/var/lib/wnbase/pending-settings.json` while the Base is offline or not registered yet, and is retried every 2 minutes until it is accepted.
 
 Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new `latitude`/`longitude` is also written, unrounded, into BirdNET-Go's `config.yaml` (only the `latitude` and `longitude` keys directly under `birdnet:` change; the rest of the file is kept as it was), and the `birdnet-go` container is restarted, so BirdNET-Go's species range filter uses the real location. At 0,0 it would accept species that do not occur there. The exact location stays on the device; `roundCoords` only applies to what wdx-agent uploads. `apn` creates or updates the NetworkManager connection `wn-4g`; `wifi` saves the connection `wn-uplink`, which is used the next time the radio is free. Response:
 

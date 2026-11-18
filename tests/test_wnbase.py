@@ -348,3 +348,74 @@ class Registration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStation(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        make_db(f"{self.tmp}/birdnet.db")
+        self.ini = f"{self.tmp}/wdx-agent.ini"
+        Path(self.ini).write_text(
+            "[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\napi_key = wn_KEY\n"
+            f"device_id = wnb_1\npath = {self.tmp}/birdnet.db\nstation_id = s1\nstate_file = {self.tmp}/state.json\n"
+            "station_name = Hill top\nlatitude = 51.5\nlongitude = -0.12\n")
+        self.posts, self.reply = [], (200, {"ok": True})
+        cfg = wnbase.Config(None, agent_config=self.ini, agent_module=AGENT, setup_code_file=f"{self.tmp}/code",
+                            state_dir=f"{self.tmp}/state")
+        self.app = wnbase.App(cfg, runner=lambda a, t=30: (127, ""), http_post=self.fake_post)
+
+    def fake_post(self, url, body, timeout=30, token=None):
+        self.posts.append((url, body, token))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+    def ini_value(self, key):
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.ini)
+        return cp["agent"].get(key)
+
+    def test_off_by_default(self):
+        self.assertIs(self.app.info()["test"], False)
+        self.assertIn("Test station, not on the public map", wnbase.DASHBOARD)
+
+    def test_switch_on_then_off_with_retry(self):
+        self.app.configure({"test": True})
+        self.assertEqual(self.ini_value("test"), "yes")
+        self.assertIs(self.app.info()["test"], True)
+        self.reply = OSError("offline")
+        self.assertFalse(self.app.sync_settings())          # offline: kept for later
+        self.assertTrue(os.path.exists(self.app.pending_settings_path()))
+        self.app.configure({"test": False})                  # changed again while offline: newest value wins
+        self.assertEqual(self.ini_value("test"), "no")
+        self.reply = (200, {"ok": True})
+        self.assertTrue(self.app.sync_settings())
+        self.assertEqual(self.posts[-1], ("https://example.org/api/v1/devices/wnb_1/settings", {"test": False}, "wn_KEY"))
+        self.assertFalse(os.path.exists(self.app.pending_settings_path()))
+        n = len(self.posts)
+        self.assertTrue(self.app.sync_settings())            # nothing waiting: no request
+        self.assertEqual(len(self.posts), n)
+
+    def test_refused_is_kept(self):
+        self.app.configure({"test": True})
+        self.reply = (503, {"error": "busy"})
+        self.assertFalse(self.app.sync_settings())
+        self.assertTrue(os.path.exists(self.app.pending_settings_path()))
+
+    def test_waits_for_registration(self):
+        Path(self.ini).write_text(Path(self.ini).read_text().replace("api_key = wn_KEY", "api_key ="))
+        self.app.queue_settings({"test": False})
+        self.assertFalse(self.app.sync_settings())
+        self.assertEqual(self.posts, [])
+
+    def test_bad_value(self):
+        with self.assertRaises(wnbase.ApiError):
+            self.app.configure({"test": "yes"})
+
+    def test_agent_sends_the_flag(self):
+        self.app.configure({"test": True})
+        s = self.app.settings()
+        if not hasattr(s, "test"):
+            self.skipTest("wdx-agent older than 0.4.4")
+        ev = next(e for _, e in self.app.agent.pending_batch(s) if e)
+        self.assertIs(ev["test"], True)

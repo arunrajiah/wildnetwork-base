@@ -110,6 +110,8 @@ Do this while the Base is still on the table.
 
 Once it has internet, the Base registers itself with Wildlife Network and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wlnw.org/stations).
 
+**Testing first?** Tick **Test station** in Setup while the Base is on your table. Its detections then stay off the public map (the dashboard says "Test station, not on the public map"). Untick it when the Base is in its real place.
+
 ## 5. Build the outdoor enclosure
 
 Skip this for an indoor Base.
