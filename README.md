@@ -26,7 +26,7 @@ Phase 0 uses off-the-shelf parts: a Raspberry Pi 4 or 5, a 32 GB or larger micro
 4. Put the card in the Base and power it on. The first boot takes about 2 minutes (it grows the file system to fill the card and loads BirdNET-Go).
 5. Join the Wi-Fi `Wildlife Network-XXXX` with the password on the label, open http://10.42.0.1 and continue with [First-time setup](#first-time-setup).
 
-Everything the Base needs is on the card, including BirdNET-Go (release 20260823, see `image/VERSIONS`), so the first boot needs no internet. BirdNET-Go picks the first microphone it finds; its own settings page is at http://10.42.0.1:8080.
+Everything the Base needs is on the card, including BirdNET-Go (release 20260823, see `image/VERSIONS`), so the first boot needs no internet. The Base points BirdNET-Go at the first USB microphone it finds (see [The microphone](#the-microphone)); BirdNET-Go's own settings page is at http://10.42.0.1:8080.
 
 **No label?** The hotspot name, password and setup code are made on the Base at its first boot. They are shown on the login screen of a monitor plugged into the HDMI port, and written to `wildnetwork-setup.txt` on the boot partition (put the card in a computer to read it). Anyone holding the SD card can read that file; that is acceptable, because anyone with the card in hand already has full access to the Base.
 
@@ -86,12 +86,27 @@ The installer:
 
 - installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
 - installs wdx-agent from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
-- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there;
+- installs BirdNET-Go with its official installer (`https://github.com/tphakala/birdnet-go/raw/main/install.sh`, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
+- sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
 - installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
 - prints the hotspot name, its password and the setup code.
 
-It is safe to run again: configs, the setup code and BirdNET-Go are kept. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
+It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default `latest`), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing).
+
+### The microphone
+
+BirdNET-Go's default audio device is `sysdefault`, which on a Raspberry Pi is the onboard audio (card 0). It cannot record, so BirdNET-Go would start without an audio source. `base/mic.py` fixes that:
+
+- it reads `arecord -l` and picks the first USB capture device (without one, the first capture device of any kind);
+- it writes it into `~/birdnet-go-app/config/config.yaml` as `realtime.audio.sources[0].device: ":<card>,<device>"` (for example `":1,0"`), changing only that line, and keeps the previous file as `config.yaml.before-mic`;
+- it runs from `install.sh` (every run) and before every BirdNET-Go start (a line in the image's unit, a drop-in `birdnet-go.service.d/wnbase-mic.conf` on a stock Pi), so a microphone plugged in later, or one that gets a new card number, is followed;
+- it never changes a device you chose: the setting is only replaced while it says `sysdefault` (or is empty), or still holds the value `mic.py` wrote last (kept in `/var/lib/wnbase/mic-device`);
+- with no capture device at all it prints a warning and leaves the config alone.
+
+To see what it finds: `python3 /opt/wnbase/mic.py --list`. To use another microphone, choose it in BirdNET-Go's audio settings (port 8080) or set `device` in `config.yaml` yourself and restart BirdNET-Go (`sudo systemctl restart birdnet-go`); your choice is kept from then on. To go back to automatic choice, set `device: sysdefault`.
+
+The dashboard shows **No microphone found** when BirdNET-Go's log says it started without an active audio source, when `arecord -l` lists no capture device, or when the device in `config.yaml` names a card that cannot record. The same is in `microphone` of `GET /api/info`.
 
 ## For developers
 
@@ -117,10 +132,11 @@ No code needed.
 {"hardwareId": "10000000abcd1234", "model": "wildnetwork-base", "hostname": "wnbase",
  "software": {"wnbase": "0.1.0", "wdx-agent": "0.3.0", "birdnetGo": "latest"},
  "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
- "registration": "registered"}
+ "registration": "registered",
+ "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null}}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -196,7 +212,9 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
-| `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh`, `base/audio-detect.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit, microphone choice |
+| `base/mic.py` | Picks BirdNET-Go's microphone (`/opt/wnbase/mic.py`); also used by wnbase for the microphone check |
+| `base/birdnet-go-check.sh` | Checks that BirdNET-Go's installer finished (used by `install.sh`) |
+| `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
 | `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
 | `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`) |

@@ -32,20 +32,59 @@ fi
 WN_USER="$RUN_USER" WN_BASE_URL="$BASE_URL" WN_SRC="$HERE" bash "$HERE/base/provision.sh" --live
 
 # --- BirdNET-Go (official installer, Docker based; data in ~/birdnet-go-app) ----------------------------------
+BNG_CFG="$RUN_HOME/birdnet-go-app/config/config.yaml"
+RERUN="cd '$HERE' && sudo ./install.sh"
+fail() {
+  printf '\033[1;31m%s\033[0m\n' "$@" >&2
+  exit 1
+}
 if [ "${WN_SKIP_BIRDNET:-0}" = 1 ]; then
   warn "Skipping BirdNET-Go (WN_SKIP_BIRDNET=1)"
 elif [ -f /etc/systemd/system/birdnet-go.service ] || [ -f /lib/systemd/system/birdnet-go.service ] \
-     || [ -f "$RUN_HOME/birdnet-go-app/config/config.yaml" ]; then
+     || [ -f "$BNG_CFG" ]; then
   say "BirdNET-Go is already installed"
 else
   say "Installing BirdNET-Go with its official installer (this takes a while)"
+  # The installer refuses to run as root and calls sudo itself. Without a terminal those sudo calls cannot ask for
+  # a password and the installer can stop early, so make sure sudo works for $RUN_USER before starting.
+  if ! sudo -u "$RUN_USER" -H sudo -n true 2>/dev/null; then
+    if [ -t 0 ]; then
+      say "BirdNET-Go's installer needs sudo as $RUN_USER. Enter the password of $RUN_USER if asked."
+      sudo -u "$RUN_USER" -H sudo -v || fail "sudo did not work for $RUN_USER; BirdNET-Go was not installed."
+    else
+      fail "BirdNET-Go's installer needs sudo as $RUN_USER, which asks for a password, and there is no terminal to type it." \
+           "Run this again from an SSH session with a terminal (ssh -t ...):" "  $RERUN"
+    fi
+  fi
   bng="$(mktemp -d)"
   curl -fsSL https://github.com/tphakala/birdnet-go/raw/main/install.sh -o "$bng/install.sh"
   chown -R "$RUN_USER" "$bng"
-  # The installer refuses to run as root and uses sudo itself; --silent takes settings from BIRDNET_* variables.
-  # The location is written into its config.yaml later, when it is entered in the Base setup.
-  (cd "$bng" && sudo -u "$RUN_USER" -H env BIRDNET_TELEMETRY=false bash ./install.sh -v "${WN_BIRDNET_VERSION:-latest}" --silent)
+  # --silent takes settings from BIRDNET_* variables. The location is written into its config.yaml later, when it
+  # is entered in the Base setup.
+  rc=0
+  (cd "$bng" && sudo -u "$RUN_USER" -H env BIRDNET_TELEMETRY=false bash ./install.sh -v "${WN_BIRDNET_VERSION:-latest}" --silent) || rc=$?
   rm -rf "$bng"
+  # Its exit status is not enough: it has exited 0 after creating only the log folder.
+  if ! out="$(bash "$HERE/base/birdnet-go-check.sh" "$BNG_CFG" 90)"; then
+    fail "$out" "BirdNET-Go's installer stopped early (exit status $rc). Nothing else is wrong; run this again" \
+         "from an SSH session with a terminal:" "  $RERUN"
+  fi
+  say "$out"
+fi
+
+# --- microphone: BirdNET-Go's default "sysdefault" is the Pi's onboard audio, which cannot record ------------
+if [ "${WN_SKIP_BIRDNET:-0}" != 1 ] && [ -f "$BNG_CFG" ]; then
+  # Also on every BirdNET-Go start (a microphone plugged in later, or a new card number after a reboot). The SD card
+  # image has this line in its own unit; the official installer's unit gets it as a drop-in.
+  if [ -f /etc/systemd/system/birdnet-go.service ] && ! grep -q mic.py /etc/systemd/system/birdnet-go.service; then
+    install -d -m 755 /etc/systemd/system/birdnet-go.service.d
+    printf '[Service]\nExecStartPre=-/usr/bin/python3 /opt/wnbase/mic.py --config %s --state /var/lib/wnbase/mic-device\n' \
+      "$BNG_CFG" > /etc/systemd/system/birdnet-go.service.d/wnbase-mic.conf
+    systemctl daemon-reload
+  fi
+  python3 /opt/wnbase/mic.py --list
+  python3 /opt/wnbase/mic.py --config "$BNG_CFG" --state /var/lib/wnbase/mic-device --restart \
+    | while IFS= read -r line; do case "$line" in WARNING:*) warn "$line" ;; *) say "$line" ;; esac; done
 fi
 
 CODE="$(python3 /opt/wnbase/wnbase.py --config /etc/wnbase/wnbase.ini --setup-code)"

@@ -65,7 +65,13 @@ The microphone matters more than any other part: a good one hears birds two or t
 - **Good:** an omnidirectional USB microphone, or a USB sound card with an external microphone. Microphones built on the Primo EM272 capsule are widely used by BirdNET-Pi and BirdNET-Go stations.
 - **Usable for a start:** a USB lavalier (clip-on) microphone.
 - **Avoid:** webcams, headsets, and microphones with automatic noise cancelling: they filter out bird song.
-- Use one microphone per Base. If several sound devices are connected, BirdNET-Go uses the first one it finds.
+- Use one microphone per Base. The Base sets BirdNET-Go to the first USB microphone it finds (the Pi's own audio socket cannot record). If several are connected, unplug the ones you do not want, or choose one yourself (below).
+
+#### How the microphone is chosen, and how to change it
+
+At install time and every time BirdNET-Go starts, the Base looks for sound devices that can record (`arecord -l`) and writes the first USB one into BirdNET-Go's settings, for example `":1,0"` (card 1, device 0). It only does this while BirdNET-Go is still on its default (`sysdefault`) or on a microphone the Base chose itself, so a choice you make is kept. If no microphone is plugged in, the dashboard shows **No microphone found**.
+
+To use a different microphone: open BirdNET-Go's page at http://10.42.0.1:8080, open its audio settings, pick the device and save. Or, over SSH, run `python3 /opt/wnbase/mic.py --list` to see the devices, set `device:` under `realtime: audio: sources:` in `~/birdnet-go-app/config/config.yaml`, and run `sudo systemctl restart birdnet-go`. To let the Base choose again, set it back to `sysdefault`.
 
 ## 2. Flash the SD card
 
@@ -152,7 +158,7 @@ Skip this for an indoor Base.
 |---|---|---|
 | No Wildlife Network-XXXX Wi-Fi after 3 minutes | The card was not written correctly, or the Base joined a known Wi-Fi network | Flash the card again. If it joined your Wi-Fi, open http://wildnetwork-base-XXXX.local on that network instead. |
 | The Pi restarts on its own | Power supply too weak, or the battery is low | Use the official supply. On solar, check the battery voltage and the converter rating. |
-| No detections after playing bird sounds | Microphone not found, or too quiet | Open http://10.42.0.1:8080 and check the sound level. Try another USB port; unplug other sound devices. |
+| No detections after playing bird sounds, or **No microphone found** on the dashboard | Microphone not found, the wrong one chosen, or too quiet | Plug the microphone in and restart the Base (the Base picks it up when BirdNET-Go starts). Open http://10.42.0.1:8080 and check the sound level. Try another USB port; unplug other sound devices. See [How the microphone is chosen](#how-the-microphone-is-chosen-and-how-to-change-it). |
 | Many wrong species | The location is not set, or the microphone picks up a lot of noise | Set the location in Setup. Move the Base away from noise. |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
 | "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |

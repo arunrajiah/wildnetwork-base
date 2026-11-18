@@ -38,6 +38,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import mic  # mic.py next to this file: arecord parsing and BirdNET-Go's audio device setting
+except ImportError:  # an install that has not copied mic.py yet
+    mic = None
+
 VERSION = "0.1.0"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0 or 1
 CODE_LENGTH = 8
@@ -47,6 +53,10 @@ MAX_BODY = 64 * 1024
 RECENT_MAX = 200
 REGISTER_EVERY = 300        # seconds between registration checks
 REGISTER_MAX_BACKOFF = 3600
+MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
+# BirdNET-Go log lines (lowercase) that tell whether it records: the newest one wins
+MIC_LOG_BAD = ("starting without active audio sources", "audio card capture failed")
+MIC_LOG_OK = ("capture started",)
 AUDIO_TYPES = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac", ".aac": "audio/aac",
                ".m4a": "audio/mp4", ".opus": "audio/ogg", ".ogg": "audio/ogg"}
 
@@ -286,6 +296,7 @@ class App:
         self.served_cursor: str | None = None
         self.fails: dict[str, deque] = defaultdict(deque)
         self._bng: tuple[float, str | None] | None = None
+        self._mic: tuple[float, dict] | None = None
 
     # --- helpers -----------------------------------------------------------------------------------------
 
@@ -363,6 +374,52 @@ class App:
         self._bng = (time.monotonic(), version)
         return version
 
+    def birdnet_audio_log(self) -> bool | None:
+        """From BirdNET-Go's recent log: True when capture started last, False when it last said it has no
+        audio source, None when the log says neither (or docker is not available)."""
+        name = self.cfg.birdnet_container
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+            return None
+        rc, out = self.run(["sh", "-c", f"docker logs --tail 500 {name} 2>&1"], 15)
+        if rc != 0:
+            return None
+        low = out.lower()
+        bad = max(low.rfind(p) for p in MIC_LOG_BAD)
+        ok = max(low.rfind(p) for p in MIC_LOG_OK)
+        if bad < 0 and ok < 0:
+            return None
+        return ok > bad
+
+    def microphone(self) -> dict:
+        """Whether BirdNET-Go has a microphone. `found` is true, false, or null when it cannot be told.
+
+        Signals, strongest first: BirdNET-Go's own log (no active audio source / capture started), then the capture
+        devices in `arecord -l` against the device set in BirdNET-Go's config.yaml."""
+        if self._mic and time.monotonic() - self._mic[0] < MIC_CHECK_EVERY:
+            return self._mic[1]
+        res = {"found": None, "device": None, "devices": [], "problem": None}
+        if mic is not None:
+            devices = mic.list_devices(self.run)
+            try:
+                text = Path(self.birdnet_config(self.settings())).read_text("utf-8", "surrogateescape")
+                res["device"] = mic.read_device(text)
+            except (ApiError, OSError):
+                pass
+            res["devices"] = [mic.describe(d) for d in devices or []]
+            heard = self.birdnet_audio_log()
+            if heard is False:
+                res["found"], res["problem"] = False, "BirdNET-Go is running without an active audio source."
+            elif devices == []:
+                res["found"], res["problem"] = False, "No sound card that can record is connected."
+            elif heard is True:
+                res["found"] = True
+            elif devices:
+                res["found"] = mic.device_ok(res["device"], devices)
+                if not res["found"]:
+                    res["problem"] = f'BirdNET-Go is set to record from "{res["device"] or "sysdefault"}", which cannot record.'
+        self._mic = (time.monotonic(), res)
+        return res
+
     # --- endpoints ---------------------------------------------------------------------------------------
 
     def info(self) -> dict:
@@ -380,6 +437,7 @@ class App:
             "latitude": s.latitude if s else None,
             "longitude": s.longitude if s else None,
             "registration": "registered" if s and s.api_key else self.registration,
+            "microphone": self.microphone(),
         }
 
     # --- registration with Wildlife Network -------------------------------------------------------------------
@@ -754,11 +812,12 @@ summary{cursor:pointer;font-weight:600}label{display:block;margin-top:10px;font-
 input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:4px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.msg{margin-top:10px;font-size:.9rem}.err{color:var(--bad)}.okc{color:var(--accent)}
 .empty{color:var(--dim);padding:14px 4px}h3{font-size:.95rem;margin:18px 0 0}details.adv{background:none;border:0;padding:0;margin-top:14px}
-.reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}
+.reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}.reg.bad{color:var(--bad);font-weight:600}
 </style></head><body><main>
 <header><span class="logo" aria-hidden="true">%%LOGO%%</span><h1 id="name">Wildlife Network Base</h1><span id="dot" class="dot" title="Health"></span></header>
 <div class="sub" id="hw"></div>
 <p class="reg" id="reg"></p>
+<p class="reg bad" id="mic" hidden></p>
 <h2>Health</h2>
 <div class="grid" id="health"></div>
 <div class="msg err" id="err"></div>
@@ -796,6 +855,8 @@ async function loadInfo(){const i=await j('/api/info');$('name').textContent=i.n
 const reg=i.registration||'';const rp=$('reg');
 rp.className='reg '+(reg==='registered'?'ok':'wait');
 rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting-for-internet'?'Will connect to Wildlife Network when the Base has internet':reg==='waiting-for-setup'?'Will connect to Wildlife Network once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to Wildlife Network yet ('+reg.slice(7)+'). It keeps trying.':'';
+const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
+$('mic').textContent=mc.found===false?'No microphone found. '+(mc.problem||'')+' Plug a USB microphone into the Base, then restart it.':'';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 $('foot').textContent='wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
 if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';if(!i.configured)$('setup').open=true}}
