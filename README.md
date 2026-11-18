@@ -75,6 +75,11 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
+- **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
+
+  What stays open on the network (no login), as BirdNET-Go 20260823 decides: its dashboard pages, `GET /api/v2/detections`, `/api/v2/detections/recent`, `/api/v2/detections/<id>` and the other read-only views (species, statistics, clips, spectrograms), so apps that read detections, such as BirdEcho, work as before at `http://<base>:8080`.
+  What needs the login: all settings (`/api/v2/settings`), control actions (`/api/v2/control/...`: restart, reload model), and changes to detections (delete, review, lock, ignore species, batch actions).
+  The wnbase dashboard and API on port 80 are separate and work as described above.
 
 ## Install on a stock Raspberry Pi
 
@@ -217,6 +222,10 @@ Up to N (default and maximum 500) WDX events not yet uploaded, and the cursor to
 
 `cursor` is null and `events` empty when nothing is waiting. The cursor can also cover skipped rows (low confidence, noise), so a batch can have a cursor and no events: acknowledge it anyway.
 
+#### POST /api/birdnet-go-password
+
+Header `X-Setup-Code`. Returns the password of BirdNET-Go's settings page made by this Base, `{"password": "...", "url": ":8080"}`, or `404` when BirdNET-Go has a password set by its owner instead.
+
 #### POST /api/ack
 
 Header `X-Setup-Code`. Body `{"cursor": <cursor from the last /api/detections response>}`. Response `{"ok": true, "advanced": true}`. Any other cursor is refused with `409`.
@@ -246,6 +255,7 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
+| `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
 | `base/mic.py` | Picks BirdNET-Go's microphone (`/opt/wnbase/mic.py`); also used by wnbase for the microphone check |
 | `base/birdnet-go-check.sh` | Checks that BirdNET-Go's installer finished (used by `install.sh`) |
 | `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |

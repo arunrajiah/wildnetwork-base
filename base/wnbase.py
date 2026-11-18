@@ -94,7 +94,8 @@ class Config:
         self.birdnet_config = g(w, "birdnet_config", "")  # empty: ../config/config.yaml from the database folder
         self.birdnet_container = g(w, "birdnet_container", "birdnet-go")
         self.setup_code_file = g(w, "setup_code_file", "/etc/wnbase/setup-code")
-        self.state_dir = g(w, "state_dir", "/var/lib/wnbase")   # queued messages for Wildlife Network
+        self.state_dir = g(w, "state_dir", "/var/lib/wnbase")
+        self.birdnet_password_file = g(w, "birdnet_password_file", "/etc/wnbase/birdnet-go-password")   # queued messages for Wildlife Network
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
         self.hotspot_force = g(h, "force", "no").lower() in ("1", "yes", "true", "on")
@@ -671,6 +672,16 @@ class App:
             return tuple(int(x) if x.isdigit() else 0 for x in v.split("."))
         return parts(version) < parts(wanted)
 
+    def birdnet_password(self) -> dict:
+        """BirdNET-Go's settings password made by this Base (bngauth.py), for the owner who has the setup code."""
+        try:
+            pw = Path(self.cfg.birdnet_password_file).read_text().strip()
+        except OSError:
+            pw = ""
+        if not pw:
+            raise ApiError(404, "no BirdNET-Go password made by this Base (it may have been set in BirdNET-Go)")
+        return {"password": pw, "url": ":8080"}
+
     def connection_exists(self, name: str) -> bool:
         rc, out = self.run(["nmcli", "-t", "-f", "NAME", "connection", "show"], 15)
         return rc == 0 and name in [nmcli_fields(x)[0] for x in out.splitlines()]
@@ -933,7 +944,8 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 <label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
 </details>
-<p><button class="primary" type="submit">Save</button></p>
+<p><button class="primary" type="submit">Save</button> <button type="button" id="bngpw">Show BirdNET-Go password</button></p>
+<p class="sub" id="bngmsg"></p>
 <div class="msg" id="fmsg"></div>
 </form></details>
 <p class="sub" id="foot"></p>
@@ -982,6 +994,8 @@ if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test')
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
 m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
+$('bngpw').onclick=async()=>{const m=$('bngmsg');try{const r=await j('/api/birdnet-go-password',{method:'POST',headers:{'x-setup-code':$('f-code').value.trim()}});
+m.textContent='BirdNET-Go settings (port 8080) password: '+r.password}catch(e){m.textContent=e.message}};
 $('geo').onclick=()=>{const g=$('geomsg');
 if(!navigator.geolocation){g.textContent='This browser cannot share its location here. Type the coordinates instead (from a map app).';return}
 g.textContent='Finding location...';navigator.geolocation.getCurrentPosition(p=>{$('f-lat').value=p.coords.latitude.toFixed(5);$('f-lon').value=p.coords.longitude.toFixed(5);g.textContent='Location filled in.'},
@@ -1074,6 +1088,9 @@ class Handler(BaseHTTPRequestHandler):
                 if u.path.startswith("/clips/"):
                     return self.send_clip(app.clip_path(u.path[len("/clips/"):]))
             elif method == "POST":
+                if u.path == "/api/birdnet-go-password":
+                    app.check_code(self.client_address[0], self.headers.get("X-Setup-Code") or "")
+                    return self.send_json(app.birdnet_password())
                 if u.path in ("/api/config", "/api/ack"):
                     body = self.read_json()
                     app.check_code(self.client_address[0], self.headers.get("X-Setup-Code") or "")

@@ -99,8 +99,14 @@ if [ "${WN_SKIP_BIRDNET:-0}" != 1 ] && [ -f "$BNG_CFG" ]; then
     systemctl daemon-reload
   fi
   python3 /opt/wnbase/mic.py --list
-  python3 /opt/wnbase/mic.py --config "$BNG_CFG" --state /var/lib/wnbase/mic-device --restart \
-    | while IFS= read -r line; do case "$line" in WARNING:*) warn "$line" ;; *) say "$line" ;; esac; done
+  report() { while IFS= read -r line; do case "$line" in WARNING:*) warn "$line" ;; *) say "$line" ;; esac; done <<<"$1"; }
+  mic_out="$(python3 /opt/wnbase/mic.py --config "$BNG_CFG" --state /var/lib/wnbase/mic-device)"; report "$mic_out"
+  # BirdNET-Go's settings page is open to anyone on the Wi-Fi: put it behind a password of this Base.
+  auth_out="$(python3 /opt/wnbase/bngauth.py --config "$BNG_CFG")"; report "$auth_out"
+  if grep -q "microphone set to\|now need a password" <<<"$mic_out$auth_out"; then
+    if systemctl restart birdnet-go.service 2>/dev/null || docker restart birdnet-go >/dev/null; then say "BirdNET-Go restarted"
+    else warn "Could not restart BirdNET-Go; restart it yourself (sudo systemctl restart birdnet-go)"; fi
+  fi
 fi
 
 CODE="$(python3 /opt/wnbase/wnbase.py --config /etc/wnbase/wnbase.ini --setup-code)"

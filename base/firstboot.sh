@@ -58,6 +58,8 @@ install -d -o "$RUN_USER" -g "$RUN_USER" "$APP" "$APP/config" "$APP/data" "$APP/
 if [ ! -f "$APP/config/config.yaml" ]; then
   install -m 644 -o "$RUN_USER" -g "$RUN_USER" /opt/wnbase/birdnet-go-config.yaml "$APP/config/config.yaml"
 fi
+# BirdNET-Go's settings behind a password of this Base (reading detections stays open)
+python3 /opt/wnbase/bngauth.py --config "$APP/config/config.yaml" || true
 /opt/wnbase/birdnet-go-unit.sh "$RUN_USER" "$IMAGE" > /etc/systemd/system/birdnet-go.service
 systemctl daemon-reload
 systemctl enable birdnet-go.service >/dev/null 2>&1

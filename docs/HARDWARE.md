@@ -91,7 +91,7 @@ Always test indoors before you climb a pole.
 3. Wait about 2 minutes. The first start takes longer than later ones.
 4. On your phone, open the Wi-Fi settings and join **Wildlife Network-XXXX**. The password is printed on the label as `wn-` followed by the setup code. No label yet? The setup code is also in the file `wildnetwork-setup.txt` on the card's `bootfs` drive, and on the screen if you plug in a monitor.
 5. Open **http://10.42.0.1** in the phone's browser. You should see the Wildlife Network Base dashboard.
-6. Play a bird recording from another phone or speaker near the microphone. Within a minute or two it should appear under recent detections. BirdNET-Go's own page at http://10.42.0.1:8080 shows the live sound level, which tells you the microphone is working.
+6. Play a bird recording from another phone or speaker near the microphone. Within a minute or two it should appear under recent detections. BirdNET-Go's own page at http://10.42.0.1:8080 shows the live sound level, which tells you the microphone is working. Its settings need a password: in the dashboard's Setup, enter the setup code and tap **Show BirdNET-Go password**.
 
 If nothing appears, see [Troubleshooting](#7-troubleshooting).
 
