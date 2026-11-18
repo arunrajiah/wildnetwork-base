@@ -110,6 +110,9 @@ if command -v rfkill >/dev/null && rfkill list wifi 2>/dev/null | grep -q "Soft 
   warn "Wi-Fi is blocked until a country is set: run again with WN_WIFI_COUNTRY=XX (two-letter code)"
 fi
 
+# Same as the SD card image: the details on the boot partition, for a Base whose label is lost.
+bash "$HERE/base/setup-file.sh" "$(hostname)" "$SSID" "$CODE"
+
 say "Done."
 echo
 echo "  Hotspot (Wi-Fi):  $SSID"

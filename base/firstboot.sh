@@ -42,19 +42,7 @@ Wildlife Network Base
   Then open:   http://10.42.0.1
 
 ISSUE
-if [ -d /boot/firmware ]; then
-  cat > /boot/firmware/wildnetwork-setup.txt <<TXT
-Wildlife Network Base
-
-Name:        $NAME
-Wi-Fi:       $SSID
-Password:    wn-$CODE
-Setup code:  $CODE
-Then open:   http://10.42.0.1
-
-Anyone holding this SD card can read this file. Keep the card inside the Base.
-TXT
-fi
+/opt/wnbase/setup-file.sh "$NAME" "$SSID" "$CODE"
 
 # The root file system is grown to the full card by Raspberry Pi OS itself on the first boot (rpi-resize).
 systemd-notify --ready 2>/dev/null || true

@@ -68,6 +68,7 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 ## Security notes
 
 - The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
+- They are also written to `wildnetwork-setup.txt` on the boot partition, by the first boot of the image and by every run of `install.sh` on a stock Raspberry Pi, so a Base whose label is lost can still be set up. Anyone who can take the SD card out can read that file (and the whole card), so keep the Base closed and the card inside. Delete the file if you prefer: it is not needed to run the Base, and `install.sh` writes it again when run again. The install log `/var/log/wnbase-install.log` holds the same details and is readable by the Base's user and root.
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
@@ -215,6 +216,7 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
 | `base/mic.py` | Picks BirdNET-Go's microphone (`/opt/wnbase/mic.py`); also used by wnbase for the microphone check |
 | `base/birdnet-go-check.sh` | Checks that BirdNET-Go's installer finished (used by `install.sh`) |
+| `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
 | `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
 | `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
