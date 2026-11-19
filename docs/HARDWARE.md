@@ -93,6 +93,13 @@ Always test indoors before you climb a pole.
 5. Open **http://10.42.0.1** in the phone's browser. You should see the Wildlife Network Base dashboard.
 6. Play a bird recording from another phone or speaker near the microphone. Within a minute or two it should appear under recent detections. BirdNET-Go's own page at http://10.42.0.1:8080 shows the live sound level, which tells you the microphone is working. Its settings need a password: in the dashboard's Setup, enter the setup code and tap **Show BirdNET-Go password**.
 
+**Power-cut check** (do it once per Base, with the Base on your home Wi-Fi, before it goes outdoors):
+
+1. Note the time, then pull the power plug. Wait 10 seconds and plug it back in.
+2. Within about 2 minutes the dashboard must open at `http://<hostname>.local` on your home Wi-Fi, and the hotspot `Wildlife Network-XXXX` must not be in your phone's Wi-Fi list.
+3. Repeat 5 times in a row. It must rejoin home Wi-Fi every time.
+4. Over SSH, `journalctl -t wn-net --since today` shows one line per start ("home Wi-Fi connected at boot ..."). If any start says "switch to hotspot", note the reason in that line and report it.
+
 If nothing appears, see [Troubleshooting](#7-troubleshooting).
 
 ## 4. Set it up
@@ -166,6 +173,8 @@ Skip this for an indoor Base.
 | Many wrong species | The location is not set, or the microphone picks up a lot of noise | Set the location in Setup. Move the Base away from noise. |
 | Installed on Raspberry Pi OS, but no hotspot, no dashboard or no BirdNET-Go | The install stopped early | Read `/var/log/wnbase-install.log` (over SSH, no sudo needed). It ends with the reason and the command to run again. |
 | Label lost | | Put the SD card in a computer and open `wildnetwork-setup.txt` on its `bootfs` drive. |
+| After a power cut the Base stays on its own hotspot and stops uploading | Home Wi-Fi was slow to come back | Nothing to do: the Base waits up to 90 seconds for home Wi-Fi at boot and tries it again every 5 minutes while no phone is on the hotspot. `journalctl -t wn-net` shows each switch and why. Logs are kept across power cuts: `journalctl -b -1 -t wn-net -u wdx-agent` shows the boot before. |
+| The Wi-Fi router or its password changed | The Base cannot join its home Wi-Fi | Join the Base's hotspot and enter the new network in Setup, or put the card in a computer and add `wildnetwork-wifi.txt` to `bootfs` (see [Set home Wi-Fi from the SD card](../README.md#set-home-wi-fi-from-the-sd-card)). |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
 | "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
 | Hot Base, slow detections in summer | Overheating | Add shade, a fan case or a bigger heatsink; move the box out of direct sun. |

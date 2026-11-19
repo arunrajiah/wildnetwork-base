@@ -515,3 +515,19 @@ class Mdns(unittest.TestCase):
         txt = dict(t.text.split("=", 1) for t in ET.fromstring(Path(cfg.avahi_service_file).read_text())
                    .find("service").findall("txt-record"))
         self.assertEqual(txt["name"], "Ridge")
+
+
+class Uplink(unittest.TestCase):
+    def test_info_reports_profile_and_ssid(self):
+        tmp = tempfile.mkdtemp()
+        Path(f"{tmp}/ini").write_text(f"[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\npath = {tmp}/db\n")
+
+        def run(args, timeout=30):
+            if "--active" in args:
+                return 0, "wn-hotspot:802-11-wireless:wlan0\nwn-uplink:802-11-wireless:wlan0\n"
+            if args[:3] == ["nmcli", "-g", "802-11-wireless.ssid"]:
+                return 0, "Farm office\n"
+            return 127, ""
+        app = wnbase.App(wnbase.Config(None, agent_config=f"{tmp}/ini", agent_module=AGENT, setup_code_file=f"{tmp}/code",
+                                       state_dir=f"{tmp}/state", avahi_service_file=""), runner=run)
+        self.assertEqual(app.info()["uplink"], {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"})

@@ -54,7 +54,27 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
-The hotspot runs whenever the Wi-Fi radio is not connected to a network. When the Base joins a Wi-Fi network (the one set during setup, or one set when the SD card was flashed) the hotspot stops, and the dashboard is at `http://<hostname>.local` on that network. To keep the hotspot on regardless, set `force = yes` under `[hotspot]` in `/etc/wnbase/wnbase.ini`.
+The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet.py`) decides, and logs every switch and its reason with the tag `wn-net` (`journalctl -t wn-net`):
+
+- **At boot** home Wi-Fi gets up to 90 seconds: the Base scans and tries its saved Wi-Fi network. Only if it is still not connected does the hotspot start. With no Wi-Fi network saved at all, the hotspot starts at once.
+- **In hotspot mode** the Base tries home Wi-Fi again every 5 minutes, but only while no phone is connected to the hotspot, so a setup in progress is never interrupted. When home Wi-Fi works, the hotspot goes down.
+- **When home Wi-Fi drops** (a router restarting, a short outage) the Base waits 3 minutes before starting the hotspot.
+
+`tests/test_wnnet.py` checks this against a simulated NetworkManager: boot with home Wi-Fi in range, five power cuts in a row, boot without it and the router coming back later, a router restart in normal running, and a phone on the hotspot during setup. On a real Base, do the power-cut check in [docs/HARDWARE.md](docs/HARDWARE.md#3-test-it-on-a-table-first).
+
+The hotspot profile `wn-hotspot` never connects by itself (`autoconnect no`, also fixed on Bases set up earlier, at every start of `wn-net`): an access point needs no scan, so it used to take the radio at boot before home Wi-Fi had finished scanning, and the Base stayed in hotspot mode after a power cut. The times are `boot_wait_seconds`, `retry_seconds` and `fallback_seconds` under `[hotspot]` in `/etc/wnbase/wnbase.ini`; restart with `sudo systemctl restart wn-net`. To keep the hotspot on regardless, set `force = yes` there. On home Wi-Fi the dashboard is at `http://<hostname>.local`.
+
+### Set home Wi-Fi from the SD card
+
+If the Base cannot reach its Wi-Fi any more (new router, new password) and you cannot join its hotspot, put the SD card in a computer and create `wildnetwork-wifi.txt` on the boot partition (`bootfs`) with a plain text editor:
+
+```text
+ssid=My Home Wi-Fi
+password=the Wi-Fi password
+country=IN
+```
+
+`country` (two letters) is optional. At the next start the Base saves this as its home Wi-Fi (the `wn-uplink` profile, other Wi-Fi profiles switched off) and then deletes the file, so the password does not stay on the card. It leaves `wildnetwork-wifi.txt.applied` with the network name and the result, never the password. A password must have 8 to 63 characters; a file without a usable network name or password is not applied, but is still removed.
 
 ## Data pickup (Base without a connection)
 
@@ -74,6 +94,7 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Health reports (see [Health reports](#health-reports)) carry no audio, no detections and no location.
+- `wildnetwork-wifi.txt` on the boot partition is read once at boot and deleted; the password is not kept on the card.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 - **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
@@ -94,12 +115,13 @@ sudo ./install.sh
 The installer:
 
 - installs `network-manager`, `modemmanager`, `sqlite3`, `python3` and `curl`;
-- installs wdx-agent from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
+- installs wdx-agent (0.4.5 or later logs an hourly upload summary, also right after the network comes back, and retries within a minute after a network error; its service starts after `network-online.target`) from `https://wlnw.org/agent/wdx_agent.py` (or a `wdx_agent.py` placed next to `install.sh` when offline) into `/opt/wdx-agent`;
 - installs BirdNET-Go with its official installer (the one from the pinned release's tag, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
 - sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
-- installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
+- installs and enables `wnbase.service`, `wn-net.service` (home Wi-Fi first, hotspot as fallback; it replaces the older `wn-hotspot.service` and `wn-hotspot.timer`, which are removed) and `wdx-agent.service`;
 - prints the hotspot name, its password and the setup code;
+- keeps the system journal on the card across reboots and power cuts (`/etc/systemd/journald.conf.d/wnbase.conf`: `Storage=persistent`, at most 200 MB), so `journalctl -b -1` shows what happened before the last restart;
 - writes everything it prints to `/var/log/wnbase-install.log` (appended on every run, readable by the Base's user without sudo) and prints that path at the end, also when it stops with an error.
 
 It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default: the release pinned in `image/VERSIONS`, the same as the SD card image, currently `20260823`; `latest` takes BirdNET-Go's newest, whose database layout wdx-agent may not know yet), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing), `WN_INSTALL_LOG`.
@@ -199,10 +221,10 @@ No code needed.
  "configured": true, "deviceId": "wnb_1", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
  "registration": "registered",
  "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null},
- "test": false}
+ "test": false, "uplink": {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"}}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `test` is true for a test station (see `POST /api/config`). `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `test` is true for a test station (see `POST /api/config`). `uplink` is the active connection that carries traffic out (`type` `wifi`, `4g` or `ethernet`, the NetworkManager `profile`, and the `ssid` for Wi-Fi), or null while the Base only runs its hotspot. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -218,7 +240,7 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 
 `test` (default off) makes this a **test station**: `test = yes` in `/etc/wdx-agent.ini`, so wdx-agent (0.4.4 or later) adds the top-level field `"test": true` to every event, and Wildlife Network keeps those events apart and never shows them publicly. Each change is also sent to Wildlife Network as `POST <site>/api/v1/devices/<deviceId>/settings` with `{"test": true|false}` and the device key (`Authorization: Bearer`). It waits in `/var/lib/wnbase/pending-settings.json` while the Base is offline or not registered yet, and is retried every 2 minutes until it is accepted.
 
-Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new `latitude`/`longitude` is also written, unrounded, into BirdNET-Go's `config.yaml` (only the `latitude` and `longitude` keys directly under `birdnet:` change; the rest of the file is kept as it was), and the `birdnet-go` container is restarted, so BirdNET-Go's species range filter uses the real location. At 0,0 it would accept species that do not occur there. The exact location stays on the device; `roundCoords` only applies to what wdx-agent uploads. `apn` creates or updates the NetworkManager connection `wn-4g`; `wifi` saves the connection `wn-uplink`, which is used the next time the radio is free. Response:
+Writes `/etc/wdx-agent.ini` (other keys are kept) and restarts wdx-agent. A new `latitude`/`longitude` is also written, unrounded, into BirdNET-Go's `config.yaml` (only the `latitude` and `longitude` keys directly under `birdnet:` change; the rest of the file is kept as it was), and the `birdnet-go` container is restarted, so BirdNET-Go's species range filter uses the real location. At 0,0 it would accept species that do not occur there. The exact location stays on the device; `roundCoords` only applies to what wdx-agent uploads. `apn` creates or updates the NetworkManager connection `wn-4g`. `wifi` writes the Base's one home Wi-Fi profile, `wn-uplink` (created or updated), and switches off (`autoconnect no`) every other Wi-Fi client profile on `wlan0`, such as the `netplan-wlan0-...` one Raspberry Pi Imager makes, so only one profile competes for the radio. 4G and Ethernet profiles are not touched. `wn-net` moves to the new network once no phone is on the hotspot (within 5 minutes), or at the next boot. Response:
 
 ```json
 {"ok": true, "configured": true}
@@ -281,7 +303,8 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | Path | What |
 | --- | --- |
 | `base/wnbase.py` | Dashboard and local API (`/opt/wnbase/wnbase.py`) |
-| `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
+| `base/wnnet.py` | Home Wi-Fi first, hotspot as fallback (`wn-net.service`) |
+| `base/hotspot.sh` | Starts the hotspot now, by hand (`/opt/wnbase/hotspot.sh`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
 | `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
@@ -290,7 +313,7 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
 | `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
-| `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
+| `systemd/` | `wnbase.service`, `wn-net.service`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
 | `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`) |
 
 `/etc/wnbase/wnbase.ini`:
@@ -313,6 +336,9 @@ setup_code_file = /etc/wnbase/setup-code
 ifname = wlan0
 ssid_prefix = Wildlife Network-
 force = no
+boot_wait_seconds = 90
+retry_seconds = 300
+fallback_seconds = 180
 ```
 
 ## Part of an open wildlife toolkit

@@ -51,7 +51,7 @@ fi
 rm -f "$tmp"
 
 # --- wnbase --------------------------------------------------------------------------------------------------
-for f in wnbase.py mic.py bngauth.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh setup-file.sh; do
+for f in wnbase.py mic.py bngauth.py wnnet.py hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh setup-file.sh; do
   install -m 755 "$SRC/base/$f" "/opt/wnbase/$f"
 done
 
@@ -105,17 +105,38 @@ ifname = wlan0
 ssid_prefix = Wildlife Network-
 # yes: keep the hotspot up even when the Wi-Fi radio could join a known network
 force = no
+# At boot, how long home Wi-Fi gets before the hotspot starts; in hotspot mode, how often home Wi-Fi is tried
+# again (only while no phone is on the hotspot); how long a dropped home Wi-Fi may be away before the hotspot.
+boot_wait_seconds = 90
+retry_seconds = 300
+fallback_seconds = 180
 INI
   say "Wrote /etc/wnbase/wnbase.ini"
 fi
 
+# --- persistent journal (logs survive a power cut; capped at 200 MB) -------------------------------------------
+install -d -m 755 /etc/systemd/journald.conf.d
+install -m 644 "$SRC/systemd/journald.conf.d/wnbase.conf" /etc/systemd/journald.conf.d/wnbase.conf
+install -d -m 2755 -g systemd-journal /var/log/journal 2>/dev/null || install -d -m 2755 /var/log/journal
+if [ "$MODE" = --live ]; then
+  systemctl restart systemd-journald || true
+  journalctl --flush >/dev/null 2>&1 || true
+fi
+
 # --- services ------------------------------------------------------------------------------------------------
-for u in wnbase.service wn-hotspot.service wn-hotspot.timer; do
+# The hotspot used to be started by wn-hotspot.service and a timer, and its profile connected by itself, so after a
+# power cut it could take the radio before home Wi-Fi had finished scanning. wn-net.service decides now.
+for u in wn-hotspot.timer wn-hotspot.service; do
+  systemctl disable "$u" >/dev/null 2>&1 || true
+  [ "$MODE" = --live ] && systemctl stop "$u" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$u"
+done
+for u in wnbase.service wn-net.service; do
   install -m 644 "$SRC/systemd/$u" /etc/systemd/system/
 done
 sed "s/__USER__/$RUN_USER/" "$SRC/systemd/wdx-agent.service" > /etc/systemd/system/wdx-agent.service
 chmod 644 /etc/systemd/system/wdx-agent.service
-UNITS=(wnbase.service wn-hotspot.service wn-hotspot.timer wdx-agent.service)
+UNITS=(wnbase.service wn-net.service wdx-agent.service)
 if [ "$MODE" = --image ]; then
   for u in wn-firstboot.service wn-ssh-key.service; do
     sed "s/__USER__/$RUN_USER/" "$SRC/systemd/$u" > "/etc/systemd/system/$u"
@@ -123,14 +144,17 @@ if [ "$MODE" = --image ]; then
   done
   UNITS+=(wn-firstboot.service wn-ssh-key.service docker.service)
 fi
+# wdx-agent starts after network-online.target; with NetworkManager that target only means something when
+# NetworkManager-wait-online is enabled (it gives up after a while, so a Base without a network still starts).
+UNITS+=(NetworkManager-wait-online.service)
 # Works in a chroot too: enabling only writes the symlinks.
 systemctl enable "${UNITS[@]}" >/dev/null 2>&1
 
 if [ "$MODE" = --live ]; then
   systemctl daemon-reload
-  systemctl start wn-hotspot.timer
+  # Also fixes an existing hotspot profile (autoconnect no). On a Base installed over Wi-Fi it finds home Wi-Fi
+  # connected and leaves it alone.
+  systemctl restart wn-net.service
   systemctl restart wnbase.service
   systemctl restart wdx-agent.service || true
-  # The hotspot is not started here: on a Base installed over Wi-Fi that would cut this session.
-  # It starts at the next boot, or within 2 minutes once the Wi-Fi radio is free.
 fi
