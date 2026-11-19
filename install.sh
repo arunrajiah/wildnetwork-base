@@ -127,4 +127,4 @@ echo "  Setup code:       $CODE"
 echo "  Then open:        http://10.42.0.1"
 echo
 echo "Write these on the label of the Base. On a network the dashboard is also at http://$(hostname).local"
-echo "Reboot to start the hotspot (or run: sudo /opt/wnbase/hotspot.sh --force, which drops a Wi-Fi SSH session)."
+echo "The hotspot starts only when home Wi-Fi is not available (or run: sudo /opt/wnbase/hotspot.sh, which drops a Wi-Fi SSH session)."

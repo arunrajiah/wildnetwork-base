@@ -166,6 +166,7 @@ Skip this for an indoor Base.
 | Many wrong species | The location is not set, or the microphone picks up a lot of noise | Set the location in Setup. Move the Base away from noise. |
 | Installed on Raspberry Pi OS, but no hotspot, no dashboard or no BirdNET-Go | The install stopped early | Read `/var/log/wnbase-install.log` (over SSH, no sudo needed). It ends with the reason and the command to run again. |
 | Label lost | | Put the SD card in a computer and open `wildnetwork-setup.txt` on its `bootfs` drive. |
+| After a power cut the Base stays on its own hotspot and stops uploading | Home Wi-Fi was slow to come back | Nothing to do: the Base waits up to 90 seconds for home Wi-Fi at boot and tries it again every 5 minutes while no phone is on the hotspot. `journalctl -t wn-net` shows each switch and why. |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
 | "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
 | Hot Base, slow detections in summer | Overheating | Add shade, a fan case or a bigger heatsink; move the box out of direct sun. |

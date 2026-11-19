@@ -54,7 +54,13 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
-The hotspot runs whenever the Wi-Fi radio is not connected to a network. When the Base joins a Wi-Fi network (the one set during setup, or one set when the SD card was flashed) the hotspot stops, and the dashboard is at `http://<hostname>.local` on that network. To keep the hotspot on regardless, set `force = yes` under `[hotspot]` in `/etc/wnbase/wnbase.ini`.
+The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet.py`) decides, and logs every switch and its reason with the tag `wn-net` (`journalctl -t wn-net`):
+
+- **At boot** home Wi-Fi gets up to 90 seconds: the Base scans and tries its saved Wi-Fi network. Only if it is still not connected does the hotspot start. With no Wi-Fi network saved at all, the hotspot starts at once.
+- **In hotspot mode** the Base tries home Wi-Fi again every 5 minutes, but only while no phone is connected to the hotspot, so a setup in progress is never interrupted. When home Wi-Fi works, the hotspot goes down.
+- **When home Wi-Fi drops** (a router restarting, a short outage) the Base waits 3 minutes before starting the hotspot.
+
+The hotspot profile `wn-hotspot` never connects by itself (`autoconnect no`, also fixed on Bases set up earlier, at every start of `wn-net`): an access point needs no scan, so it used to take the radio at boot before home Wi-Fi had finished scanning, and the Base stayed in hotspot mode after a power cut. The times are `boot_wait_seconds`, `retry_seconds` and `fallback_seconds` under `[hotspot]` in `/etc/wnbase/wnbase.ini`; restart with `sudo systemctl restart wn-net`. To keep the hotspot on regardless, set `force = yes` there. On home Wi-Fi the dashboard is at `http://<hostname>.local`.
 
 ## Data pickup (Base without a connection)
 
@@ -98,7 +104,7 @@ The installer:
 - installs BirdNET-Go with its official installer (the one from the pinned release's tag, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
 - sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
-- installs and enables `wnbase.service`, `wn-hotspot.service` (plus `wn-hotspot.timer`) and `wdx-agent.service`;
+- installs and enables `wnbase.service`, `wn-net.service` (home Wi-Fi first, hotspot as fallback; it replaces the older `wn-hotspot.service` and `wn-hotspot.timer`, which are removed) and `wdx-agent.service`;
 - prints the hotspot name, its password and the setup code;
 - writes everything it prints to `/var/log/wnbase-install.log` (appended on every run, readable by the Base's user without sudo) and prints that path at the end, also when it stops with an error.
 
@@ -281,7 +287,8 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | Path | What |
 | --- | --- |
 | `base/wnbase.py` | Dashboard and local API (`/opt/wnbase/wnbase.py`) |
-| `base/hotspot.sh` | Creates and keeps the hotspot (`/opt/wnbase/hotspot.sh`) |
+| `base/wnnet.py` | Home Wi-Fi first, hotspot as fallback (`wn-net.service`) |
+| `base/hotspot.sh` | Starts the hotspot now, by hand (`/opt/wnbase/hotspot.sh`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
 | `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
@@ -290,7 +297,7 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
 | `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
-| `systemd/` | `wnbase.service`, `wn-hotspot.service`, `wn-hotspot.timer`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
+| `systemd/` | `wnbase.service`, `wn-net.service`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
 | `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`) |
 
 `/etc/wnbase/wnbase.ini`:
@@ -313,6 +320,9 @@ setup_code_file = /etc/wnbase/setup-code
 ifname = wlan0
 ssid_prefix = Wildlife Network-
 force = no
+boot_wait_seconds = 90
+retry_seconds = 300
+fallback_seconds = 180
 ```
 
 ## Part of an open wildlife toolkit
