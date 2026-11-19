@@ -60,6 +60,8 @@ The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet
 - **In hotspot mode** the Base tries home Wi-Fi again every 5 minutes, but only while no phone is connected to the hotspot, so a setup in progress is never interrupted. When home Wi-Fi works, the hotspot goes down.
 - **When home Wi-Fi drops** (a router restarting, a short outage) the Base waits 3 minutes before starting the hotspot.
 
+`tests/test_wnnet.py` checks this against a simulated NetworkManager: boot with home Wi-Fi in range, five power cuts in a row, boot without it and the router coming back later, a router restart in normal running, and a phone on the hotspot during setup. On a real Base, do the power-cut check in [docs/HARDWARE.md](docs/HARDWARE.md#3-test-it-on-a-table-first).
+
 The hotspot profile `wn-hotspot` never connects by itself (`autoconnect no`, also fixed on Bases set up earlier, at every start of `wn-net`): an access point needs no scan, so it used to take the radio at boot before home Wi-Fi had finished scanning, and the Base stayed in hotspot mode after a power cut. The times are `boot_wait_seconds`, `retry_seconds` and `fallback_seconds` under `[hotspot]` in `/etc/wnbase/wnbase.ini`; restart with `sudo systemctl restart wn-net`. To keep the hotspot on regardless, set `force = yes` there. On home Wi-Fi the dashboard is at `http://<hostname>.local`.
 
 ### Set home Wi-Fi from the SD card
