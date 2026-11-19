@@ -231,6 +231,38 @@ class OneHomeWifi(unittest.TestCase):
         self.assertEqual(wnnet.client_profiles(w.run, "wlan0")[0], "wn-uplink")
 
 
+class WifiFromCard(unittest.TestCase):
+    def test_parse(self):
+        self.assertEqual(wnnet.read_wifi_file("\ufeff# home\nSSID = My Home\r\npassword=\"pa ss=word\"\ncountry: in\nfoo=bar\n"),
+                         {"ssid": "My Home", "password": "pa ss=word", "country": "in"})
+
+    def test_applied_at_boot_and_password_removed(self):
+        w = World(profiles={"netplan-wlan0-Old": "Old"}, in_range=False)
+        net = make(w)
+        card = Path(net.boot_dir, "wildnetwork-wifi.txt")
+        card.write_text("ssid=Home\npassword=correct-horse\ncountry=IN\n")
+        w.in_range = True
+        net.boot()
+        self.assertEqual(w.profiles["wn-uplink"], "Home")
+        self.assertEqual(w.auto["netplan-wlan0-Old"], "no")
+        self.assertIn(["raspi-config", "nonint", "do_wifi_country", "IN"], w.log)
+        self.assertEqual(w.active, "wn-uplink")
+        self.assertFalse(card.exists())
+        applied = Path(net.boot_dir, "wildnetwork-wifi.txt.applied").read_text()
+        self.assertIn("ssid=Home", applied)
+        self.assertNotIn("correct-horse", applied)
+
+    def test_bad_file_is_not_applied_but_still_removed(self):
+        w = World()
+        net = make(w)
+        card = Path(net.boot_dir, "wildnetwork-wifi.txt")
+        card.write_text("ssid=Home\npassword=short\n")
+        net.apply_wifi_file()
+        self.assertNotIn("wn-uplink", w.profiles)
+        self.assertFalse(card.exists())
+        self.assertIn("not applied", Path(net.boot_dir, "wildnetwork-wifi.txt.applied").read_text())
+
+
 class Install(unittest.TestCase):
     def test_service_replaces_the_hotspot_timer(self):
         prov = (ROOT / "base" / "provision.sh").read_text()

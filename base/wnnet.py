@@ -24,6 +24,7 @@ import configparser
 import os
 import sys
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wnbase  # noqa: E402
@@ -33,6 +34,7 @@ UPLINK = "wn-uplink"          # the one home Wi-Fi profile the Base manages
 CHECK_EVERY = 15              # seconds between checks while running
 CONNECT_WAIT = 45             # seconds nmcli may take to join a network
 WIFI_TYPE = "802-11-wireless"
+WIFI_FILE = "wildnetwork-wifi.txt"
 
 
 def log(msg: str) -> None:
@@ -115,6 +117,28 @@ def save_uplink(run, ifname: str, ssid: str, psk: str) -> list[str]:
             warnings.append(f"could not switch off Wi-Fi profile {other}: {out.strip()[:120]}")
     log(f"home Wi-Fi saved in {UPLINK} for {ssid!r}")
     return warnings
+
+
+def read_wifi_file(text: str) -> dict:
+    """wildnetwork-wifi.txt: `ssid=`, `password=`, `country=` lines (also `SSID:` style). Unknown lines ignored."""
+    out = {}
+    for line in text.splitlines():
+        line = line.strip().lstrip("﻿")
+        if not line or line.startswith("#"):
+            continue
+        sep = "=" if "=" in line else ":" if ":" in line else None
+        if not sep:
+            continue
+        k, v = line.split(sep, 1)
+        k = k.strip().lower().replace(" ", "")
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+            v = v[1:-1]
+        key = {"ssid": "ssid", "network": "ssid", "wifi": "ssid", "password": "password", "psk": "password",
+               "pass": "password", "country": "country"}.get(k)
+        if key:
+            out[key] = v
+    return out
 
 
 class Net:
@@ -206,10 +230,46 @@ class Net:
             log(f"home Wi-Fi {ssid!r} ({name}) did not connect ({why}): {out.strip()[:160]}")
         return None
 
+    def apply_wifi_file(self) -> None:
+        """wildnetwork-wifi.txt on the boot partition: save it as home Wi-Fi, then remove the password from the card."""
+        boot = self.boot_dir or next((d for d in ("/boot/firmware", "/boot") if os.path.isfile(f"{d}/config.txt")), None)
+        if not boot:
+            return
+        path = os.path.join(boot, WIFI_FILE)
+        try:
+            text = Path(path).read_text(errors="replace")
+        except OSError:
+            return
+        w = read_wifi_file(text)
+        ssid, psk, country = w.get("ssid", ""), w.get("password", ""), w.get("country", "").upper()
+        note = []
+        if not ssid or not 8 <= len(psk) <= 63:
+            note.append("not applied: needs ssid= and a password= of 8 to 63 characters")
+            log(f"{WIFI_FILE}: {note[0]}")
+        else:
+            if len(country) == 2 and country.isalpha():
+                rc, _ = self.run(["raspi-config", "nonint", "do_wifi_country", country], 30)
+                if rc != 0:
+                    self.run(["iw", "reg", "set", country], 10)
+                note.append(f"Wi-Fi country {country}")
+            note += save_uplink(self.run, self.s.ifname, ssid, psk)
+            log(f"{WIFI_FILE}: home Wi-Fi {ssid!r} applied from the SD card")
+        # The password must not stay on the card: keep a note without it, delete the original.
+        try:
+            Path(path + ".applied").write_text(
+                f"Applied {time.strftime('%Y-%m-%d %H:%M:%S')} for ssid={ssid}\n" + "".join(f"{n}\n" for n in note) +
+                "The password was removed from the card. To change Wi-Fi again, add a new wildnetwork-wifi.txt.\n")
+            with open(path, "r+b") as f:     # overwrite before deleting (FAT keeps no copies, best effort)
+                f.write(b"\0" * len(text.encode(errors="replace")))
+            os.unlink(path)
+        except OSError as e:
+            log(f"{WIFI_FILE}: could not remove it from the card: {e}")
+
     # --- the decisions ---
 
     def boot(self) -> None:
         self.ensure_hotspot_profile()
+        self.apply_wifi_file()
         if self.s.force:
             self.hotspot_up("force = yes in wnbase.ini")
             return

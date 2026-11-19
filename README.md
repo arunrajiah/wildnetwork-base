@@ -62,6 +62,18 @@ The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet
 
 The hotspot profile `wn-hotspot` never connects by itself (`autoconnect no`, also fixed on Bases set up earlier, at every start of `wn-net`): an access point needs no scan, so it used to take the radio at boot before home Wi-Fi had finished scanning, and the Base stayed in hotspot mode after a power cut. The times are `boot_wait_seconds`, `retry_seconds` and `fallback_seconds` under `[hotspot]` in `/etc/wnbase/wnbase.ini`; restart with `sudo systemctl restart wn-net`. To keep the hotspot on regardless, set `force = yes` there. On home Wi-Fi the dashboard is at `http://<hostname>.local`.
 
+### Set home Wi-Fi from the SD card
+
+If the Base cannot reach its Wi-Fi any more (new router, new password) and you cannot join its hotspot, put the SD card in a computer and create `wildnetwork-wifi.txt` on the boot partition (`bootfs`) with a plain text editor:
+
+```text
+ssid=My Home Wi-Fi
+password=the Wi-Fi password
+country=IN
+```
+
+`country` (two letters) is optional. At the next start the Base saves this as its home Wi-Fi (the `wn-uplink` profile, other Wi-Fi profiles switched off) and then deletes the file, so the password does not stay on the card. It leaves `wildnetwork-wifi.txt.applied` with the network name and the result, never the password. A password must have 8 to 63 characters; a file without a usable network name or password is not applied, but is still removed.
+
 ## Data pickup (Base without a connection)
 
 When the Base has no 4G or Wi-Fi, a phone carries the data out:
@@ -80,6 +92,7 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 - Changing settings and acknowledging a pickup need the setup code. Wrong codes are rate limited per address.
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Health reports (see [Health reports](#health-reports)) carry no audio, no detections and no location.
+- `wildnetwork-wifi.txt` on the boot partition is read once at boot and deleted; the password is not kept on the card.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 - **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
