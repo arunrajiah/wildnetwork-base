@@ -114,6 +114,15 @@ INI
   say "Wrote /etc/wnbase/wnbase.ini"
 fi
 
+# --- persistent journal (logs survive a power cut; capped at 200 MB) -------------------------------------------
+install -d -m 755 /etc/systemd/journald.conf.d
+install -m 644 "$SRC/systemd/journald.conf.d/wnbase.conf" /etc/systemd/journald.conf.d/wnbase.conf
+install -d -m 2755 -g systemd-journal /var/log/journal 2>/dev/null || install -d -m 2755 /var/log/journal
+if [ "$MODE" = --live ]; then
+  systemctl restart systemd-journald || true
+  journalctl --flush >/dev/null 2>&1 || true
+fi
+
 # --- services ------------------------------------------------------------------------------------------------
 # The hotspot used to be started by wn-hotspot.service and a timer, and its profile connected by itself, so after a
 # power cut it could take the radio before home Wi-Fi had finished scanning. wn-net.service decides now.

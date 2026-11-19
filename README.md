@@ -119,6 +119,7 @@ The installer:
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
 - installs and enables `wnbase.service`, `wn-net.service` (home Wi-Fi first, hotspot as fallback; it replaces the older `wn-hotspot.service` and `wn-hotspot.timer`, which are removed) and `wdx-agent.service`;
 - prints the hotspot name, its password and the setup code;
+- keeps the system journal on the card across reboots and power cuts (`/etc/systemd/journald.conf.d/wnbase.conf`: `Storage=persistent`, at most 200 MB), so `journalctl -b -1` shows what happened before the last restart;
 - writes everything it prints to `/var/log/wnbase-install.log` (appended on every run, readable by the Base's user without sudo) and prints that path at the end, also when it stops with an error.
 
 It is safe to run again: configs, the setup code and BirdNET-Go are kept, and the microphone is checked again. Options are environment variables: `WN_USER`, `WN_BASE_URL`, `WN_SKIP_BIRDNET=1`, `WN_BIRDNET_VERSION` (default: the release pinned in `image/VERSIONS`, the same as the SD card image, currently `20260823`; `latest` takes BirdNET-Go's newest, whose database layout wdx-agent may not know yet), `WN_WIFI_COUNTRY` (two-letter code, needed once for the hotspot if it was not set when flashing), `WN_INSTALL_LOG`.
