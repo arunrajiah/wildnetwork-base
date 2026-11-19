@@ -210,6 +210,27 @@ class PowerCut(unittest.TestCase):
         self.assertEqual(w.active, wnnet.HOTSPOT)
 
 
+class OneHomeWifi(unittest.TestCase):
+    def test_save_makes_one_managed_profile(self):
+        # what the desk-test Base had: Imager's netplan profile plus an older wn-uplink with another SSID variant
+        w = World(profiles={"netplan-wlan0-Home": "Home", "wn-uplink": "Home-5G", "Cafe": "Cafe"})
+        warnings = wnnet.save_uplink(w.run, "wlan0", "Home", "secret123")
+        self.assertEqual(warnings, [])
+        self.assertEqual(w.profiles["wn-uplink"], "Home")
+        self.assertEqual(w.auto, {"netplan-wlan0-Home": "no", "wn-uplink": "yes", "Cafe": "no"})
+        self.assertFalse(any("wn-4g" in a for a in w.log if a[:3] == ["nmcli", "connection", "modify"]))
+        net = make(w)
+        net.boot()
+        self.assertEqual(w.active, "wn-uplink")
+
+    def test_save_creates_the_profile(self):
+        w = World(profiles={"netplan-wlan0-Home": "Home"})
+        wnnet.save_uplink(w.run, "wlan0", "Farm", "secret123")
+        self.assertEqual(w.profiles["wn-uplink"], "Farm")
+        self.assertEqual(w.auto["netplan-wlan0-Home"], "no")
+        self.assertEqual(wnnet.client_profiles(w.run, "wlan0")[0], "wn-uplink")
+
+
 class Install(unittest.TestCase):
     def test_service_replaces_the_hotspot_timer(self):
         prov = (ROOT / "base" / "provision.sh").read_text()

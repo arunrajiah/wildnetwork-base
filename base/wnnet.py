@@ -67,7 +67,7 @@ class Settings:
         self.ssid, self.psk = wnbase.hotspot_ssid(self.cfg, wnbase.hardware_id()), f"wn-{code}"
 
 
-# --- nmcli helpers ---------------------------------------------------
+# --- nmcli helpers (also used by wnbase.py for the setup page) ---------------------------------------------------
 
 def client_profiles(run, ifname: str) -> list[str]:
     """Saved Wi-Fi client profiles (not the hotspot) that may use ifname; the managed wn-uplink first."""
@@ -87,6 +87,34 @@ def client_profiles(run, ifname: str) -> list[str]:
 def profile_get(run, name: str, field: str) -> str:
     rc, out = run(["nmcli", "-g", field, "connection", "show", name], 15)
     return out.strip() if rc == 0 else ""
+
+
+def save_uplink(run, ifname: str, ssid: str, psk: str) -> list[str]:
+    """Write home Wi-Fi into the one managed profile wn-uplink and switch off every other Wi-Fi client profile on
+    ifname (Imager's netplan one, older setups), so only one profile competes for the radio. 4G and Ethernet
+    profiles are not touched. Returns warnings."""
+    exists = UPLINK in client_profiles(run, ifname) or \
+        run(["nmcli", "-g", "connection.id", "connection", "show", UPLINK], 15)[0] == 0
+    common = ["802-11-wireless.ssid", ssid, "802-11-wireless.mode", "infrastructure", "wifi-sec.key-mgmt", "wpa-psk",
+              "wifi-sec.psk", psk, "connection.interface-name", ifname, "connection.autoconnect", "yes",
+              "connection.autoconnect-priority", "10"]
+    if exists:
+        rc, out = run(["nmcli", "connection", "modify", UPLINK, *common], 30)
+    else:
+        rc, out = run(["nmcli", "connection", "add", "type", "wifi", "con-name", UPLINK, "ifname", ifname, *common], 30)
+    if rc != 0:
+        return [f"Wi-Fi network not saved: {out.strip()[:200] or 'nmcli not available'}"]
+    warnings = []
+    for other in client_profiles(run, ifname):
+        if other == UPLINK:
+            continue
+        rc, out = run(["nmcli", "connection", "modify", other, "connection.autoconnect", "no"], 30)
+        if rc == 0:
+            log(f"Wi-Fi profile {other!r} switched off (autoconnect no): {UPLINK} is the Base's home Wi-Fi now")
+        else:
+            warnings.append(f"could not switch off Wi-Fi profile {other}: {out.strip()[:120]}")
+    log(f"home Wi-Fi saved in {UPLINK} for {ssid!r}")
+    return warnings
 
 
 class Net:

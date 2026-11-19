@@ -459,6 +459,7 @@ class App:
             "registration": "registered" if s and s.api_key else self.registration,
             "microphone": self.microphone(),
             "test": self.test_mode(),
+            "uplink": self.uplink(),
         }
 
     # --- registration with Wildlife Network -------------------------------------------------------------------
@@ -868,17 +869,25 @@ class App:
         return []
 
     def set_wifi(self, ssid: str, psk: str) -> list[str]:
-        if self.connection_exists("wn-uplink"):
-            self.run(["nmcli", "connection", "delete", "wn-uplink"], 30)
-        rc, out = self.run(["nmcli", "connection", "add", "type", "wifi", "ifname", self.cfg.hotspot_ifname,
-                            "con-name", "wn-uplink", "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk,
-                            "connection.autoconnect", "yes", "connection.autoconnect-priority", "10"], 30)
-        if rc != 0:
-            return [f"Wi-Fi uplink not saved: {out.strip()[:200] or 'nmcli not available'}"]
-        # Not brought up now: the radio is serving this hotspot. It joins the network at the next boot, or when
-        # the hotspot is switched off, and the hotspot comes back whenever no uplink is connected.
-        log(f"Wi-Fi uplink wn-uplink saved for {ssid!r}")
-        return []
+        """Save home Wi-Fi in the one managed profile (wn-uplink) and switch off other Wi-Fi client profiles.
+
+        Not brought up now: the radio may be serving this hotspot to the phone doing the setup. wn-net.service
+        moves to it once no phone is on the hotspot (within 5 minutes), or at the next boot."""
+        import wnnet
+        return wnnet.save_uplink(self.run, self.cfg.hotspot_ifname, ssid, psk)
+
+    def uplink(self) -> dict | None:
+        """The connection carrying traffic out: {type, profile, ssid (Wi-Fi only)}, or None."""
+        net = self.network()
+        kinds = {"gsm": "4g", "802-3-ethernet": "ethernet", "802-11-wireless": "wifi"}
+        for a in net.get("active") or []:
+            if a["type"] in kinds and a["name"] != "wn-hotspot":
+                up = {"type": kinds[a["type"]], "profile": a["name"], "ssid": None}
+                if up["type"] == "wifi":
+                    rc, out = self.run(["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", a["name"]], 15)
+                    up["ssid"] = (out.strip() or None) if rc == 0 else None
+                return up
+        return None
 
     def network(self) -> dict:
         net: dict = {}
