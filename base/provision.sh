@@ -144,6 +144,9 @@ if [ "$MODE" = --image ]; then
   done
   UNITS+=(wn-firstboot.service wn-ssh-key.service docker.service)
 fi
+# wdx-agent starts after network-online.target; with NetworkManager that target only means something when
+# NetworkManager-wait-online is enabled (it gives up after a while, so a Base without a network still starts).
+UNITS+=(NetworkManager-wait-online.service)
 # Works in a chroot too: enabling only writes the symlinks.
 systemctl enable "${UNITS[@]}" >/dev/null 2>&1
 

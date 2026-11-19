@@ -85,6 +85,14 @@ class Image(unittest.TestCase):
         self.assertIn("image/deploy/*.img.xz.sha256", wf.split("Attach to the release", 1)[1])
 
 
+class AgentUnit(unittest.TestCase):
+    def test_after_network_online(self):
+        unit = (ROOT / "systemd" / "wdx-agent.service").read_text()
+        self.assertIn("After=network-online.target", unit)
+        self.assertIn("Wants=network-online.target", unit)
+        self.assertIn("NetworkManager-wait-online.service", (ROOT / "base" / "provision.sh").read_text())
+
+
 class Journal(unittest.TestCase):
     def test_persistent_and_capped(self):
         conf = (ROOT / "systemd" / "journald.conf.d" / "wnbase.conf").read_text()
