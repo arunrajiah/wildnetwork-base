@@ -453,6 +453,9 @@ class App:
                          "birdnetGo": self.birdnet_go_version()},
             "configured": self.configured(s),
             "deviceId": (s.device_id or None) if s else None,
+            # The id Wildlife Network files this Base's detections under (GET /api/v1/events?deployment=...), worked out
+            # by wdx-agent's own settings so it always matches what the agent sends.
+            "deploymentId": f"{s.system}:{s.station_id}" if s and getattr(s, "station_id", "") else None,
             "name": (s.station_name or None) if s else None,
             "latitude": s.latitude if s else None,
             "longitude": s.longitude if s else None,
