@@ -93,6 +93,56 @@ class AgentUnit(unittest.TestCase):
         self.assertIn("NetworkManager-wait-online.service", (ROOT / "base" / "provision.sh").read_text())
 
 
+class TimeZone(unittest.TestCase):
+    def unit(self, files: dict, timedatectl: str | None = None) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            bin_dir = Path(d, "bin")
+            bin_dir.mkdir()
+            fakes = {"getent": 'echo "wildnetwork:x:1000:1000::/home/wildnetwork:/bin/bash"', "id": "echo 1000"}
+            if timedatectl is not None:
+                fakes["timedatectl"] = f'echo "{timedatectl}"'
+            else:
+                fakes["timedatectl"] = "exit 1"
+            for name, body in fakes.items():
+                Path(bin_dir, name).write_text(f"#!/bin/sh\n{body}\n")
+                Path(bin_dir, name).chmod(0o755)
+            zi = Path(d, "zoneinfo")
+            for z in ("Etc/UTC", "Asia/Kolkata", "Europe/London"):
+                Path(zi, z).parent.mkdir(parents=True, exist_ok=True)
+                Path(zi, z).touch()
+            env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WN_ZONEINFO": str(zi),
+                   "WN_LOCALTIME": f"{d}/localtime", "WN_ETC_TIMEZONE": f"{d}/timezone"}
+            if "localtime" in files:
+                os.symlink(f"{zi}/{files['localtime']}", f"{d}/localtime")
+            if "timezone" in files:
+                Path(d, "timezone").write_text(files["timezone"] + "\n")
+            r = subprocess.run(["bash", str(ROOT / "base" / "birdnet-go-unit.sh"), "wildnetwork", "img:1"],
+                               capture_output=True, text=True, env=env, check=True)
+            return r.stdout
+
+    def test_unit_takes_the_host_zone(self):
+        # Debian 13: /etc/timezone can be stale; timedatectl and /etc/localtime are what the host uses
+        self.assertIn('--env TZ="Asia/Kolkata"', self.unit({"timezone": "Etc/UTC"}, timedatectl="Asia/Kolkata"))
+        self.assertIn('--env TZ="Asia/Kolkata"', self.unit({"localtime": "Asia/Kolkata", "timezone": "Etc/UTC"}))
+        self.assertIn('--env TZ="Europe/London"', self.unit({"timezone": "Europe/London"}))
+        self.assertIn('--env TZ="UTC"', self.unit({}, timedatectl="Not/AZone"))
+
+    def test_installers_leave_the_time_zone_alone(self):
+        for f in ("install.sh", "base/provision.sh", "base/firstboot.sh", "bootstrap.sh",
+                  "image/stage-wildnetwork/00-wildnetwork/00-run.sh", "image/stage-wildnetwork/01-birdnet-go/00-run.sh"):
+            text = (ROOT / f).read_text()
+            for bad in ("set-timezone", "/etc/localtime", "/etc/timezone", "dpkg-reconfigure tzdata"):
+                self.assertNotIn(bad, text, f)
+        # wnbase.ini (with [base] timezone) is only written when missing
+        prov = (ROOT / "base" / "provision.sh").read_text()
+        self.assertIn("if [ ! -f /etc/wnbase/wnbase.ini ]; then", prov)
+        self.assertIn("[base]\n# Time zone", prov.replace("\r", ""))
+        # the image's UTC is only the default of a new card
+        build = (ROOT / "image" / "build.sh").read_text()
+        self.assertEqual([l for l in build.splitlines() if "TIMEZONE" in l and not l.startswith("#")],
+                         ["TIMEZONE_DEFAULT=UTC"])
+
+
 class Journal(unittest.TestCase):
     def test_persistent_and_capped(self):
         conf = (ROOT / "systemd" / "journald.conf.d" / "wnbase.conf").read_text()
