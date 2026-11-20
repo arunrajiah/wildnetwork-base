@@ -552,6 +552,9 @@ class App:
         with self.lock:
             write_ini(self.cfg.agent_config, "agent", {"notes_zone_before": value})
         log(f"BirdNET-Go notes up to id {last} were written in {old_zone} (notes_zone_before)")
+        if self.agent_older_than(str(getattr(self.agent, "VERSION", "0")), "0.4.6"):
+            log("WARNING: wdx-agent older than 0.4.6 ignores notes_zone_before: detections not sent yet may be "
+                "shifted by the time zone change; update it (run install.sh again)")
 
     def set_birdnet_zone(self, zone: str) -> tuple[bool, list[str]]:
         """TZ of BirdNET-Go's container: rewrite its unit and restart it. (restarted, warnings)"""
@@ -1295,8 +1298,10 @@ class App:
                     d, t = local.strftime("%Y-%m-%d"), local.strftime("%H:%M:%S")
                     q = ("SELECT id, date, time, scientific_name, common_name, confidence, clip_name FROM notes "
                          "WHERE date > ? OR (date = ? AND time >= ?) ORDER BY date DESC, time DESC, id DESC LIMIT ?")
+                    notes_iso = getattr(self.agent, "notes_iso", None)   # wdx-agent 0.4.6: rows from before a zone change
                     for rid, date, clock, sci, com, conf, clip in db.execute(q, (d, d, t, RECENT_MAX)):
-                        rows.append({"id": rid, "time": self.agent.local_iso(date, clock), "scientificName": sci,
+                        when = notes_iso(s, rid, date, clock) if notes_iso else self.agent.local_iso(date, clock)
+                        rows.append({"id": rid, "time": when, "scientificName": sci,
                                      "commonName": com, "confidence": conf,
                                      "clip": os.path.basename(clip) if clip else None, "unlikely": False})
             finally:

@@ -2,9 +2,13 @@
 import configparser
 import os
 import random
+import sqlite3
 import sys
 import tempfile
+import time
 import unittest
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,6 +26,29 @@ ExecStart=/usr/bin/docker run --rm \\
     --env BIRDNET_UID=1000 \\
     ghcr.io/tphakala/birdnet-go:20260823
 """
+
+# A detection at a Base in Chennai: 10:51:34 UTC = 16:21:34 IST (seen in production on 2026-11-20).
+UTC_INSTANT = datetime(2026, 11, 20, 10, 51, 34, tzinfo=timezone.utc)
+
+
+@contextmanager
+def local_zone(zone: str):
+    """Run as a process started after `timedatectl set-timezone` (wdx-agent is restarted after the change)."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = zone
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
+def instant(iso: str) -> datetime:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
 class Lookup(unittest.TestCase):
@@ -184,6 +211,66 @@ class Base(unittest.TestCase):
         self.assertEqual(wnbase.unit_zone(self.unit.read_text()), "Asia/Kolkata")
         self.assertEqual(lib.read_text(), UNIT)
 
+
+
+
+class EventTimes(Base):
+    """wdx-agent keeps sending true UTC instants when the Base switches from Etc/UTC to Asia/Kolkata."""
+
+    def db(self):
+        os.makedirs(f"{self.tmp}/data", exist_ok=True)
+        return sqlite3.connect(f"{self.tmp}/data/birdnet.db")
+
+    def events(self):
+        agent = self.app.agent
+        return [ev for _, ev in agent.read_birdnet_go(agent.Settings(str(self.ini)), None) if ev]
+
+    def test_detections_layout(self):
+        con = self.db()
+        con.executescript(
+            "CREATE TABLE ai_models (id INTEGER PRIMARY KEY, name TEXT, version TEXT);"
+            "CREATE TABLE labels (id INTEGER PRIMARY KEY, scientific_name TEXT, model_id INTEGER, label_type_id INTEGER);"
+            "CREATE TABLE detections (id INTEGER PRIMARY KEY, model_id INTEGER, label_id INTEGER, detected_at INTEGER,"
+            " confidence REAL, latitude REAL, longitude REAL, clip_name TEXT, unlikely NUMERIC DEFAULT 0, legacy_id INTEGER);"
+            "INSERT INTO ai_models VALUES (1, 'BirdNET', '2.4');"
+            "INSERT INTO labels VALUES (1, 'Psittacula krameri', 1, 1);"
+            f"INSERT INTO detections VALUES (1, 1, 1, {int(UTC_INSTANT.timestamp())}, 0.9, 13.08, 80.27, NULL, 0, NULL);")
+        con.close()
+        with local_zone("Etc/UTC"):
+            before = self.events()[0]["eventStart"]
+        self.app.apply_timezone("test")
+        self.assertNotIn("notes_zone_before", self.ini.read_text())   # not needed: Unix timestamps
+        with local_zone("Asia/Kolkata"):
+            after = self.events()[0]["eventStart"]
+        self.assertEqual((before, after), ("2026-11-20T10:51:34Z", "2026-11-20T10:51:34Z"))
+
+    def test_notes_layout_across_the_switch(self):
+        con = self.db()
+        con.execute("CREATE TABLE notes (id INTEGER PRIMARY KEY, date TEXT, time TEXT, scientific_name TEXT, "
+                    "common_name TEXT, confidence REAL, latitude REAL, longitude REAL, clip_name TEXT)")
+        row = "INSERT INTO notes VALUES (?, '2026-11-20', ?, 'Psittacula krameri', 'Rose-ringed Parakeet', 0.9, 13.08, 80.27, NULL)"
+        con.execute(row, (1, "10:51:34"))   # written by BirdNET-Go on UTC, not sent yet
+        con.commit()
+        self.app.apply_timezone("test")
+        stop = self.calls.index(["systemctl", "stop", "birdnet-go"])
+        self.assertLess(stop, self.calls.index(["systemctl", "start", "birdnet-go"]))
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.ini)
+        self.assertEqual(cp["agent"]["notes_zone_before"], "1 Etc/UTC")
+        con.execute(row, (2, "16:31:34"))   # ten minutes later, BirdNET-Go on IST
+        con.commit()
+        con.close()
+        with local_zone("Asia/Kolkata"):
+            times = [instant(e["eventStart"]) for e in self.events()]
+            recent = self.app.recent(24 * 3650)["detections"]
+        self.assertEqual(times, [UTC_INSTANT, datetime(2026, 11, 20, 11, 1, 34, tzinfo=timezone.utc)])
+        self.assertEqual(sorted(instant(r["time"]) for r in recent), times)   # dashboard too
+        # a second change adds a boundary and keeps the first
+        self.unit.write_text(UNIT.replace("Etc/UTC", "Asia/Kolkata"))
+        self.app.cfg.timezone = "Asia/Dubai"
+        self.app.apply_timezone("test")
+        cp.read(self.ini)
+        self.assertEqual(cp["agent"]["notes_zone_before"], "1 Etc/UTC, 2 Asia/Kolkata")
 
 
 class Override(Base):
