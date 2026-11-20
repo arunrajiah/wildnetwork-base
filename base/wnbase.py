@@ -61,6 +61,8 @@ REGISTER_MAX_BACKOFF = 3600
 HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
 HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
+TZ_FILE = "wildnetwork-timezone.txt"
+TZ_AUTO = ("", "auto", "automatic", "location")
 TZ_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}")
 # TZ in BirdNET-Go's unit: `--env TZ="Asia/Kolkata"` (its installer and ours), also -e and without quotes.
 UNIT_TZ = re.compile(r'(--env|-e)(\s+|=)TZ=("?)([^"\s\\]*)\3')
@@ -89,6 +91,8 @@ class Config:
         if path:
             cp.read(path)
         w = cp["wnbase"] if cp.has_section("wnbase") else {}
+        b = cp["base"] if cp.has_section("base") else {}
+        self.path = path
         h = cp["hotspot"] if cp.has_section("hotspot") else {}
 
         def g(sec, key, default):
@@ -113,6 +117,9 @@ class Config:
         self.birdnet_service = g(w, "birdnet_service", "birdnet-go")
         self.localtime = g(w, "localtime", "/etc/localtime")
         self.etc_timezone = g(w, "etc_timezone", "/etc/timezone")
+        # [base] timezone: an IANA zone that wins over the one looked up from the location (empty: looked up)
+        self.timezone = g(b, "timezone", "")
+        self.boot_dir = g(w, "boot_dir", "")   # empty: /boot/firmware or /boot, where config.txt is
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
         self.hotspot_force = g(h, "force", "no").lower() in ("1", "yes", "true", "on")
@@ -325,6 +332,19 @@ def valid_zone(name) -> str | None:
     return name
 
 
+def read_zone_file(text: str) -> str:
+    """wildnetwork-timezone.txt: a zone name, alone or as `timezone=` (also `timezone:`, `tz=`). Comments ignored."""
+    for line in text.splitlines():
+        line = line.strip().lstrip("\ufeff")
+        if not line or line.startswith("#"):
+            continue
+        k, sep, v = line.partition("=") if "=" in line else line.partition(":")
+        if sep and k.strip().lower().replace(" ", "") in ("timezone", "tz", "zone"):
+            line = v.strip()
+        return line.strip("\"'").strip()
+    return ""
+
+
 def unit_zone(text: str) -> str | None:
     """The TZ BirdNET-Go's unit passes to its container, or None when it passes none."""
     m = UNIT_TZ.search(text)
@@ -432,8 +452,64 @@ class App:
             log(f"time zone lookup failed: {e}")
             return None
 
+    def explicit_zone(self) -> str | None:
+        """[base] timezone in wnbase.ini (set there, by POST /api/config or by wildnetwork-timezone.txt)."""
+        raw = self.cfg.timezone
+        if self.cfg.path:
+            cp = configparser.ConfigParser(interpolation=None)
+            cp.read(self.cfg.path)
+            raw = cp.get("base", "timezone", fallback="")
+        raw = (raw or "").strip()
+        if raw.lower() in TZ_AUTO:
+            return None
+        z = valid_zone(raw)
+        if not z:
+            log(f"[base] timezone {raw!r} is not a time zone this system knows; using the location's")
+        return z
+
+    def store_zone(self, zone: str | None) -> None:
+        """Keep an explicit zone (None: back to the location's) in wnbase.ini [base] timezone."""
+        self.cfg.timezone = zone or ""
+        if self.cfg.path:
+            with self.lock:
+                write_ini(self.cfg.path, "base", {"timezone": zone or ""})
+        log(f"time zone setting: {zone or 'from the location'}")
+
+    def boot_dir(self) -> str | None:
+        return self.cfg.boot_dir or next((d for d in ("/boot/firmware", "/boot") if os.path.isfile(f"{d}/config.txt")), None)
+
+    def apply_timezone_file(self) -> None:
+        """wildnetwork-timezone.txt on the boot partition: store it as the time zone setting, once. The file is
+        renamed to .applied with the result, so a zone set later in Setup is not overwritten at the next start."""
+        boot = self.boot_dir()
+        if not boot:
+            return
+        path = os.path.join(boot, TZ_FILE)
+        try:
+            text = Path(path).read_text(errors="replace")
+        except OSError:
+            return
+        raw = read_zone_file(text)
+        if raw.lower() in TZ_AUTO:
+            self.store_zone(None)
+            result = "applied: time zone from the location"
+        elif valid_zone(raw):
+            self.store_zone(raw)
+            result = f"applied: {raw}"
+        else:
+            result = f"not applied: {raw[:64]!r} is not a time zone name such as Asia/Kolkata"
+        log(f"{TZ_FILE}: {result}")
+        try:
+            Path(f"{path}.applied").write_text(f"{text.rstrip()}\n# {result}\n")
+            os.unlink(path)
+        except OSError as e:
+            log(f"{TZ_FILE} could not be renamed: {e}")
+
     def wanted_zone(self) -> tuple[str | None, str]:
-        """(zone, where it comes from): "location", or (None, "none") when the Base does not know where it is."""
+        """(zone, where it comes from): "setting" (explicit), "location", or (None, "none")."""
+        z = self.explicit_zone()
+        if z:
+            return z, "setting"
         try:
             s = self.settings()
         except ApiError:
@@ -914,7 +990,8 @@ class App:
         threading.Thread(target=loop, name="registration", daemon=True).start()
 
     def configure(self, body: dict) -> dict:
-        allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test"}
+        allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test",
+                   "timezone"}
         unknown = set(body) - allowed
         if unknown:
             raise ApiError(400, f"unknown field: {sorted(unknown)[0]}")
@@ -962,6 +1039,15 @@ class App:
             if test != self.test_mode():
                 updates["test"] = "yes" if test else "no"
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
+        zone = False   # False: not given; None: back to the location's zone
+        if "timezone" in body:
+            v = body["timezone"]
+            if v is None or (isinstance(v, str) and v.strip().lower() in TZ_AUTO):
+                zone = None
+            elif not valid_zone(v):
+                raise ApiError(400, "invalid timezone: an IANA name such as Asia/Kolkata, or empty for the location's")
+            else:
+                zone = v.strip()
         wifi = body.get("wifi")
         if wifi is not None:
             if not isinstance(wifi, dict) or not isinstance(wifi.get("ssid"), str) or not isinstance(wifi.get("psk"), str):
@@ -991,9 +1077,15 @@ class App:
                                 "Wildlife Network is told about the test station separately.")
         notes: list[str] = []
         tz = None
-        if "latitude" in updates or "longitude" in updates:
-            notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"), restart=False)
-            tz = self.apply_timezone("location saved")
+        if zone is not False:
+            self.store_zone(zone)
+        if "latitude" in updates or "longitude" in updates or zone is not False:
+            located = "latitude" in updates or "longitude" in updates
+            if located:
+                notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"), restart=False)
+            else:
+                self.birdnet_location_changed = False
+            tz = self.apply_timezone("location saved" if located else "time zone set")
             warnings += tz["warnings"]
             if self.birdnet_location_changed and not tz["birdnetRestarted"]:
                 notes += self.restart_birdnet()
@@ -1526,6 +1618,7 @@ def main() -> None:
                              "1" if cfg.hotspot_force else "0"]))
         return
     app = App(cfg)
+    app.apply_timezone_file()
     app.write_mdns()
     app.start_registration()
     app.start_health()

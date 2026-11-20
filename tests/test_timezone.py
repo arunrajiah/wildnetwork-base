@@ -101,7 +101,7 @@ class Base(unittest.TestCase):
         self.app = self.make_app()
 
     def make_app(self, **cfg):
-        app = wnbase.App(wnbase.Config(None, agent_config=str(self.ini), agent_module=AGENT,
+        app = wnbase.App(wnbase.Config(cfg.pop("path", None), agent_config=str(self.ini), agent_module=AGENT,
                                        setup_code_file=f"{self.tmp}/code", state_dir=f"{self.tmp}/state",
                                        birdnet_unit=str(self.unit), birdnet_unit_lib=f"{self.tmp}/none",
                                        localtime=str(self.localtime), etc_timezone=f"{self.tmp}/timezone",
@@ -170,6 +170,76 @@ class Base(unittest.TestCase):
         app.apply_timezone("test")
         self.assertEqual(wnbase.unit_zone(self.unit.read_text()), "Asia/Kolkata")
         self.assertEqual(lib.read_text(), UNIT)
+
+
+
+class Override(Base):
+    """An explicit zone (API, wnbase.ini, wildnetwork-timezone.txt) always wins over the looked-up one."""
+
+    def setUp(self):
+        super().setUp()
+        self.wnini = Path(self.tmp, "wnbase.ini")
+        self.wnini.write_text("[wnbase]\nport = 80\n\n[base]\ntimezone =\n")
+        self.boot = Path(self.tmp, "boot")
+        self.boot.mkdir()
+        self.app = self.make_app(path=str(self.wnini), boot_dir=str(self.boot))
+
+    def stored(self):
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.wnini)
+        return cp.get("base", "timezone")
+
+    def test_ini_wins_over_location(self):
+        self.wnini.write_text("[base]\ntimezone = Asia/Kathmandu\n")
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Kathmandu", "setting"))
+        self.app.apply_timezone("test")
+        self.assertEqual(wnbase.unit_zone(self.unit.read_text()), "Asia/Kathmandu")
+
+    def test_unknown_ini_zone_falls_back_to_location(self):
+        self.wnini.write_text("[base]\ntimezone = Mars/Olympus\n")
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Kolkata", "location"))
+
+    def test_api_sets_and_clears(self):
+        res = self.app.configure({"timezone": "Asia/Dubai"})
+        self.assertEqual(res["timezone"], "Asia/Dubai")
+        self.assertEqual(self.stored(), "Asia/Dubai")
+        self.assertEqual(self.app.system_zone(), "Asia/Dubai")
+        # a new location keeps the explicit zone
+        res = self.app.configure({"latitude": 51.5, "longitude": -0.12})
+        self.assertEqual(res["timezone"], "Asia/Dubai")
+        res = self.app.configure({"timezone": ""})   # back to the location's
+        self.assertEqual((res["timezone"], self.stored()), ("Europe/London", ""))
+        with self.assertRaises(wnbase.ApiError):
+            self.app.configure({"timezone": "Asia/Nowhere"})
+        with self.assertRaises(wnbase.ApiError):
+            self.app.configure({"timezone": 5})
+
+    def test_boot_file_applied_once(self):
+        f = self.boot / wnbase.TZ_FILE
+        f.write_text("# time zone of this Base\ntimezone=Asia/Colombo\n")
+        self.app.apply_timezone_file()
+        self.assertFalse(f.exists())
+        self.assertIn("applied: Asia/Colombo", Path(f"{f}.applied").read_text())
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Colombo", "setting"))
+        self.app.configure({"timezone": "Asia/Kolkata"})   # a later setting wins: the file is gone
+        self.app.apply_timezone_file()
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Kolkata", "setting"))
+
+    def test_boot_file_bad_or_auto(self):
+        f = self.boot / wnbase.TZ_FILE
+        f.write_text("India time\n")
+        self.app.apply_timezone_file()
+        self.assertIn("not applied", Path(f"{f}.applied").read_text())
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Kolkata", "location"))
+        self.wnini.write_text("[base]\ntimezone = Asia/Dubai\n")
+        f.write_text("auto\n")
+        self.app.apply_timezone_file()
+        self.assertEqual(self.app.wanted_zone(), ("Asia/Kolkata", "location"))
+
+    def test_read_zone_file(self):
+        for text in ("Asia/Kolkata", "timezone=Asia/Kolkata", "TZ: Asia/Kolkata\n", '\ufefftimezone = "Asia/Kolkata"'):
+            self.assertEqual(wnbase.read_zone_file(text), "Asia/Kolkata", text)
+        self.assertEqual(wnbase.read_zone_file("# only a comment\n"), "")
 
 
 if __name__ == "__main__":
