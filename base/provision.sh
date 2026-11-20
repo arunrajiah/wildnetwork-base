@@ -100,6 +100,10 @@ birdnet_config = $APP_DIR/config/config.yaml
 birdnet_container = birdnet-go
 setup_code_file = /etc/wnbase/setup-code
 
+[base]
+# Time zone of the Base and BirdNET-Go, an IANA name such as Asia/Kolkata. Empty: looked up from the station location.
+timezone =
+
 [hotspot]
 ifname = wlan0
 ssid_prefix = Wildlife Network-
