@@ -199,7 +199,7 @@ The file is rewritten when the name or test mode changes. Look for it with `avah
 Every 15 minutes (first one a minute after start) wnbase sends `POST <site>/api/v1/devices/<deviceId>/health` with the device key (`Authorization: Bearer`), once the Base is registered:
 
 ```json
-{"at": "2026-11-19T06:00:00Z", "software": {"wnbase": "0.2.0", "wdx-agent": "0.4.4", "birdnet-go": "20260823"},
+{"at": "2026-11-19T06:00:00Z", "software": {"wnbase": "0.2.1", "wdx-agent": "0.4.5", "birdnet-go": "20260823"},
  "uptimeSeconds": 86400, "boots": 3, "temperatureC": 48.2, "storage": {"freeMb": 21000, "totalMb": 31000},
  "microphone": {"active": true, "lastDetectionAt": "2026-11-19T05:58:12Z"}, "queue": {"pending": 0},
  "network": {"type": "wifi", "signal": 67, "signalUnit": "percent"}}
