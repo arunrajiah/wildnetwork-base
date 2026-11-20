@@ -121,6 +121,9 @@ class Server(unittest.TestCase):
         self.assertEqual(info["latitude"], 42.36)
         self.assertEqual(r.getheader("access-control-allow-origin"), "*")
         self.assertNotIn("wn_secret_key", json.dumps(info))
+        s = self.app.settings()
+        self.assertEqual(info["deploymentId"], f"{s.system}:{s.station_id}")  # same id the agent's events carry
+        self.assertRegex(info["deploymentId"], r"^[\w.-]+:[\w.-]+$")
 
     def test_setup_code_file_is_private(self):
         code = Path(self.app.cfg.setup_code_file).read_text().strip()
