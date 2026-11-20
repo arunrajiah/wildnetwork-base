@@ -8,7 +8,22 @@ HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 CONFIG_DIR="$HOME_DIR/birdnet-go-app/config"
 DATA_DIR="$HOME_DIR/birdnet-go-app/data"
 HOST_UID="$(id -u "$RUN_USER")"; HOST_GID="$(id -g "$RUN_USER")"
-TZ="$(cat /etc/timezone 2>/dev/null || true)"; TZ="${TZ:-UTC}"
+# The host's time zone, as BirdNET-Go's installer finds it: timedatectl, then the /etc/localtime link, then
+# /etc/timezone (stale on Debian 13). wnbase keeps the host on the station's zone and rewrites TZ here when it changes.
+ZONEINFO="${WN_ZONEINFO:-/usr/share/zoneinfo}"; LOCALTIME="${WN_LOCALTIME:-/etc/localtime}"; ETC_TZ="${WN_ETC_TIMEZONE:-/etc/timezone}"
+valid_tz() { [ -n "$1" ] && [[ "$1" =~ ^[A-Za-z][A-Za-z0-9_+/-]*$ ]] && [ -f "$ZONEINFO/$1" ]; }
+TZ=""
+cand="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+valid_tz "$cand" && TZ="$cand"
+if [ -z "$TZ" ] && [ -L "$LOCALTIME" ]; then
+  cand="$(readlink "$LOCALTIME")"; cand="${cand##*/zoneinfo/}"
+  valid_tz "$cand" && TZ="$cand"
+fi
+if [ -z "$TZ" ] && [ -f "$ETC_TZ" ]; then
+  cand="$(tr -d '[:space:]' < "$ETC_TZ")"
+  valid_tz "$cand" && TZ="$cand"
+fi
+TZ="${TZ:-UTC}"
 
 # Optional mounts, gated like the official installer: only when the host has them.
 EXTRA=""

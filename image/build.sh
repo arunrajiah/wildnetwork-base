@@ -41,6 +41,8 @@ BUILD_PASS="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40
 CONFIG_FILE="$(mktemp)"   # outside the pi-gen folder, so it is not copied into the build container image
 trap 'rm -f "$CONFIG_FILE"' EXIT
 chmod 600 "$CONFIG_FILE"
+# TIMEZONE_DEFAULT: a new card starts on UTC; each Base sets its own zone from its location (wnbase), and nothing
+# on the Base sets it back (install.sh and provision.sh leave the time zone alone).
 cat > "$CONFIG_FILE" <<CONFIG
 IMG_NAME=wildnetwork-base
 RELEASE=trixie
