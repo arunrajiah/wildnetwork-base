@@ -710,7 +710,16 @@ class App:
             "microphone": self.microphone(),
             "test": self.test_mode(),
             "uplink": self.uplink(),
+            **self.timezone_info(),
         }
+
+    def timezone_info(self) -> dict:
+        """Active time zone of the Base, where it comes from, and BirdNET-Go's (they differ only until it restarts)."""
+        active = self.system_zone()
+        wanted, source = self.wanted_zone()
+        text, _ = self.birdnet_unit_text()
+        return {"timezone": active, "timezoneSource": source if wanted and wanted == active else "system",
+                "timezoneSetting": self.explicit_zone(), "birdnetGoTimezone": unit_zone(text) if text else None}
 
     # --- registration with Wildlife Network -------------------------------------------------------------------
 
@@ -1393,6 +1402,7 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 <p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from Wildlife Network.</p>
 <label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
+<label>Time zone<input id="f-tz" spellcheck="false" placeholder="from the location, for example Asia/Kolkata"></label>
 </details>
 <p><button class="primary" type="submit">Save</button> <button type="button" id="bngpw">Show BirdNET-Go password</button></p>
 <p class="sub" id="bngmsg"></p>
@@ -1402,7 +1412,7 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let audio=null,playing=null,filled=false;
+let audio=null,playing=null,filled=false,tzInit='';
 async function j(url,opt){const r=await fetch(url,opt);const t=await r.json().catch(()=>({}));if(!r.ok)throw new Error(t.error||('HTTP '+r.status));return t}
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 function ago(iso){if(!iso)return 'never';const s=(Date.now()-new Date(iso).getTime())/1000;if(s<90)return 'just now';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
@@ -1414,8 +1424,9 @@ rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting
 $('test').hidden=!i.test;const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
 $('mic').textContent=mc.found===false?'No microphone found. '+(mc.problem||'')+' Plug a USB microphone into the Base, then restart it.':'';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
-$('foot').textContent='wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
-if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';$('f-test').checked=!!i.test;if(!i.configured)$('setup').open=true}}
+const tzw={setting:'set in Setup',location:'from the location',system:'system setting'};
+$('foot').textContent=(i.timezone?'Time zone '+i.timezone+' ('+(tzw[i.timezoneSource]||i.timezoneSource)+')'+(i.birdnetGoTimezone&&i.birdnetGoTimezone!==i.timezone?', BirdNET-Go still on '+i.birdnetGoTimezone:'')+' . ':'')+'wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
+if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';$('f-test').checked=!!i.test;tzInit=i.timezoneSetting||'';$('f-tz').value=tzInit;if(!i.configured)$('setup').open=true}}
 async function loadStatus(){const s=await j('/api/status');const h=$('health');h.replaceChildren();
 const b=s.battery;h.append(tile('Battery',b&&b.percent!=null?b.percent+'%'+(b.charging?' (charging)':''):'n/a'));
 h.append(tile('Storage free',s.storage?(s.storage.freeMb/1000).toFixed(1)+' GB':'n/a'));
@@ -1440,9 +1451,9 @@ $('form').onsubmit=async ev=>{ev.preventDefault();const m=$('fmsg');m.className=
 const v=id=>$(id).value.trim();if(v('f-name'))b.name=v('f-name');
 if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f-lon'))}
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
-if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;
+if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;if(v('f-tz')!==tzInit)b.timezone=v('f-tz');
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
-m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.warnings?' '+r.warnings.join(' '):'');
+m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.timezone?' Time zone '+r.timezone+'.':'')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
 $('bngpw').onclick=async()=>{const m=$('bngmsg');try{const r=await j('/api/birdnet-go-password',{method:'POST',headers:{'x-setup-code':$('f-code').value.trim()}});
 m.textContent='BirdNET-Go settings (port 8080) password: '+r.password}catch(e){m.textContent=e.message}};
