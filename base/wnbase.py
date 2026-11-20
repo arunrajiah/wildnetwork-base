@@ -49,7 +49,7 @@ try:
 except ImportError:
     tzgrid = None
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0 or 1
 CODE_LENGTH = 8
 FAIL_LIMIT = 10        # wrong setup codes allowed per client address ...
