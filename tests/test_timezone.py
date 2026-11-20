@@ -236,6 +236,18 @@ class Override(Base):
         self.app.apply_timezone_file()
         self.assertEqual(self.app.wanted_zone(), ("Asia/Kolkata", "location"))
 
+    def test_info_reports_the_zone(self):
+        info = self.app.timezone_info()
+        self.assertEqual(info, {"timezone": "Etc/UTC", "timezoneSource": "system", "timezoneSetting": None,
+                                "birdnetGoTimezone": "Etc/UTC"})
+        self.app.apply_timezone("test")
+        self.assertEqual(self.app.timezone_info(), {"timezone": "Asia/Kolkata", "timezoneSource": "location",
+                                                    "timezoneSetting": None, "birdnetGoTimezone": "Asia/Kolkata"})
+        self.app.configure({"timezone": "Asia/Dubai"})
+        info = self.app.info()
+        self.assertEqual((info["timezone"], info["timezoneSource"], info["timezoneSetting"]),
+                         ("Asia/Dubai", "setting", "Asia/Dubai"))
+
     def test_read_zone_file(self):
         for text in ("Asia/Kolkata", "timezone=Asia/Kolkata", "TZ: Asia/Kolkata\n", '\ufefftimezone = "Asia/Kolkata"'):
             self.assertEqual(wnbase.read_zone_file(text), "Asia/Kolkata", text)
