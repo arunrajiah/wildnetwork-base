@@ -115,6 +115,8 @@ Do this while the Base is still on the table.
 3. The **location**. Use the phone's location or type the coordinates. The exact position stays on the Base so BirdNET-Go can rule out birds that do not occur there; Wildlife Network only receives it rounded to about 1 km.
 4. **How it reaches the internet:** your Wi-Fi network and password, or your SIM's APN for a 4G modem (common APNs in India: Jio `jionet`, Airtel `airtelgprs.com`, Vi `www`; check with your operator). HiLink dongles need no APN here. Leave it empty if a phone will collect the data on visits.
 
+Saving the location also sets the Base's **time zone** from it (no internet needed), so BirdNET-Go, the BirdEcho Feed and Studio show local times. The dashboard footer shows the zone, for example "Time zone Asia/Kolkata (from the location)". To use another zone, type it under **Advanced** in Setup.
+
 Once it has internet, the Base registers itself with Wildlife Network and starts sending. Within about 15 minutes it appears under **Device health** on the [stations page](https://wlnw.org/stations).
 
 **Testing first?** Tick **Test station** in Setup while the Base is on your table. Its detections then stay off the public map (the dashboard says "Test station, not on the public map"). Untick it when the Base is in its real place.
@@ -175,6 +177,7 @@ Skip this for an indoor Base.
 | Label lost | | Put the SD card in a computer and open `wildnetwork-setup.txt` on its `bootfs` drive. |
 | After a power cut the Base stays on its own hotspot and stops uploading | Home Wi-Fi was slow to come back | Nothing to do: the Base waits up to 90 seconds for home Wi-Fi at boot and tries it again every 5 minutes while no phone is on the hotspot. `journalctl -t wn-net` shows each switch and why. Logs are kept across power cuts: `journalctl -b -1 -t wn-net -u wdx-agent` shows the boot before. |
 | The Wi-Fi router or its password changed | The Base cannot join its home Wi-Fi | Join the Base's hotspot and enter the new network in Setup, or put the card in a computer and add `wildnetwork-wifi.txt` to `bootfs` (see [Set home Wi-Fi from the SD card](../README.md#set-home-wi-fi-from-the-sd-card)). |
+| Detection times in BirdNET-Go or the BirdEcho Feed are hours off | The Base is on the wrong time zone (UTC before setup) | Check the zone in the dashboard footer. Set the location in Setup, or type the zone under **Advanced** (for example `Asia/Kolkata`), or put `wildnetwork-timezone.txt` with `timezone=Asia/Kolkata` on `bootfs` (see [Set the time zone from the SD card](../README.md#set-the-time-zone-from-the-sd-card)). Times sent to Wildlife Network are right either way. |
 | Detections stay on the Base | No internet | Check the APN or Wi-Fi in Setup, the SIM's data balance, or the signal. A phone with the field app can collect the data meanwhile. |
 | "Will connect to Wildlife Network when the Base has internet" never changes | Internet is not reaching the Base | Same as above; the Base retries on its own. |
 | Hot Base, slow detections in summer | Overheating | Add shade, a fan case or a bigger heatsink; move the box out of direct sun. |
