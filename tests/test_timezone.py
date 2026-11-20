@@ -141,6 +141,19 @@ class Base(unittest.TestCase):
         self.assertFalse(res["changed"])
         self.assertEqual(self.calls, [])
 
+    def test_switches_once_at_start(self):
+        # Set up before this version: location known, system and BirdNET-Go still on UTC
+        self.app.start_timezone().join(10)
+        self.assertEqual(self.app.system_zone(), "Asia/Kolkata")
+        self.assertEqual(wnbase.unit_zone(self.unit.read_text()), "Asia/Kolkata")
+        self.calls.clear()
+        self.make_app().start_timezone().join(10)   # next start: nothing to do
+        self.assertEqual(self.calls, [])
+
+    def test_start_survives_errors(self):
+        self.app.wanted_zone = lambda: 1 / 0
+        self.app.start_timezone().join(10)   # logged, no exception
+
     def test_saving_a_location_sets_the_zone(self):
         res = self.app.configure({"latitude": 51.5072, "longitude": -0.1276})
         self.assertEqual(res["timezone"], "Europe/London")

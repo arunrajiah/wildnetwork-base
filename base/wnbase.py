@@ -713,6 +713,20 @@ class App:
             **self.timezone_info(),
         }
 
+    def start_timezone(self) -> threading.Thread:
+        """At every start: a Base that knows its location (or has a zone set) but runs on another zone, such as one
+        set up before this version or reset by a reinstall, switches once. In the background: BirdNET-Go restarts."""
+        def run():
+            try:
+                res = self.apply_timezone("wnbase start")
+                for w in res["warnings"]:
+                    log(f"time zone: {w}")
+            except Exception:  # noqa: BLE001 - never stop wnbase over this
+                log(f"time zone check failed:\n{traceback.format_exc()}")
+        t = threading.Thread(target=run, name="timezone", daemon=True)
+        t.start()
+        return t
+
     def timezone_info(self) -> dict:
         """Active time zone of the Base, where it comes from, and BirdNET-Go's (they differ only until it restarts)."""
         active = self.system_zone()
@@ -1630,6 +1644,7 @@ def main() -> None:
         return
     app = App(cfg)
     app.apply_timezone_file()
+    app.start_timezone()
     app.write_mdns()
     app.start_registration()
     app.start_health()
