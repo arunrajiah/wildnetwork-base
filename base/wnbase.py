@@ -37,12 +37,17 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import mic  # mic.py next to this file: arecord parsing and BirdNET-Go's audio device setting
 except ImportError:  # an install that has not copied mic.py yet
     mic = None
+try:
+    import tzgrid  # tzgrid.py + tzgrid.dat next to this file: offline time zone of a location
+except ImportError:
+    tzgrid = None
 
 VERSION = "0.2.1"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0 or 1
@@ -56,6 +61,9 @@ REGISTER_MAX_BACKOFF = 3600
 HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
 HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
+TZ_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}")
+# TZ in BirdNET-Go's unit: `--env TZ="Asia/Kolkata"` (its installer and ours), also -e and without quotes.
+UNIT_TZ = re.compile(r'(--env|-e)(\s+|=)TZ=("?)([^"\s\\]*)\3')
 # BirdNET-Go log lines (lowercase) that tell whether it records: the newest one wins
 MIC_LOG_BAD = ("starting without active audio sources", "audio card capture failed")
 MIC_LOG_OK = ("capture started",)
@@ -99,6 +107,12 @@ class Config:
         self.state_dir = g(w, "state_dir", "/var/lib/wnbase")
         self.avahi_service_file = g(w, "avahi_service_file", "/etc/avahi/services/wlnw-base.service")
         self.birdnet_password_file = g(w, "birdnet_password_file", "/etc/wnbase/birdnet-go-password")   # queued messages for Wildlife Network
+        # BirdNET-Go's systemd unit (its TZ follows the Base's time zone) and the host's zone link
+        self.birdnet_unit = g(w, "birdnet_unit", "/etc/systemd/system/birdnet-go.service")
+        self.birdnet_unit_lib = g(w, "birdnet_unit_lib", "/lib/systemd/system/birdnet-go.service")
+        self.birdnet_service = g(w, "birdnet_service", "birdnet-go")
+        self.localtime = g(w, "localtime", "/etc/localtime")
+        self.etc_timezone = g(w, "etc_timezone", "/etc/timezone")
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
         self.hotspot_force = g(h, "force", "no").lower() in ("1", "yes", "true", "on")
@@ -299,9 +313,34 @@ def open_ro(path: str) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=10)
 
 
+def valid_zone(name) -> str | None:
+    """The IANA zone name when this system knows it (e.g. "Asia/Kolkata"), else None."""
+    name = (name or "").strip() if isinstance(name, str) else ""
+    if len(name) > 64 or not TZ_NAME.fullmatch(name):
+        return None
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+    return name
+
+
+def unit_zone(text: str) -> str | None:
+    """The TZ BirdNET-Go's unit passes to its container, or None when it passes none."""
+    m = UNIT_TZ.search(text)
+    return m.group(4) if m else None
+
+
+def set_unit_zone(text: str, zone: str) -> str:
+    return UNIT_TZ.sub(lambda m: f"{m.group(1)}{m.group(2)}TZ={m.group(3)}{zone}{m.group(3)}", text)
+
+
 class App:
-    def __init__(self, cfg: Config, runner=None, agent=None, http_post=None):
+    def __init__(self, cfg: Config, runner=None, agent=None, http_post=None, tz_lookup=None):
         self.cfg = cfg
+        # Offline lookup of the time zone at a location (tests pass their own)
+        self.tz_lookup = tz_lookup or (tzgrid.timezone_at if tzgrid else None)
+        self.tz_lock = threading.Lock()
         self.http_post = http_post or http_post_json
         self.registration = "waiting-for-setup"
         self.reg_backoff = REGISTER_EVERY
@@ -335,8 +374,10 @@ class App:
         return self.cfg.birdnet_config or os.path.join(os.path.dirname(os.path.dirname(self.db_path(s))),
                                                         "config", "config.yaml")
 
-    def set_birdnet_location(self, lat: float | None, lon: float | None) -> list[str]:
-        """Give BirdNET-Go the exact location so its range filter works. Unrounded: this stays on the device."""
+    def set_birdnet_location(self, lat: float | None, lon: float | None, restart: bool = True) -> list[str]:
+        """Give BirdNET-Go the exact location so its range filter works. Unrounded: this stays on the device.
+        restart=False: only write it (the caller restarts BirdNET-Go); self.birdnet_location_changed tells."""
+        self.birdnet_location_changed = False
         try:
             path = self.birdnet_config(self.settings())
         except ApiError as e:
@@ -357,10 +398,140 @@ class App:
         if new != text:
             write_atomic(path, new.encode("utf-8", "surrogateescape"))
             log(f"BirdNET-Go location updated in {path}")
-            rc, out = self.run(["docker", "restart", self.cfg.birdnet_container], 120)
-            if rc != 0:
-                notes.append(f"BirdNET-Go not restarted: {out.strip()[:200] or 'docker not available'}")
+            self.birdnet_location_changed = True
+            if restart:
+                notes += self.restart_birdnet()
         return notes
+
+    def restart_birdnet(self) -> list[str]:
+        rc, out = self.run(["docker", "restart", self.cfg.birdnet_container], 120)
+        return [] if rc == 0 else [f"BirdNET-Go not restarted: {out.strip()[:200] or 'docker not available'}"]
+
+    # --- time zone: the Base and BirdNET-Go keep local time, so detections are labelled the way the owner reads them
+
+    def system_zone(self) -> str | None:
+        """The host's time zone: the /etc/localtime link, else timedatectl."""
+        try:
+            target = os.path.realpath(self.cfg.localtime)
+        except OSError:
+            target = ""
+        if "/zoneinfo/" in target:
+            z = valid_zone(target.split("/zoneinfo/", 1)[1])
+            if z:
+                return z
+        rc, out = self.run(["timedatectl", "show", "-p", "Timezone", "--value"], 10)
+        return valid_zone(out.strip()) if rc == 0 else None
+
+    def located_zone(self, s) -> str | None:
+        """The zone at the station's location, looked up offline."""
+        if s is None or s.latitude is None or s.longitude is None or self.tz_lookup is None:
+            return None
+        try:
+            return valid_zone(self.tz_lookup(s.latitude, s.longitude))
+        except (ValueError, OSError) as e:
+            log(f"time zone lookup failed: {e}")
+            return None
+
+    def wanted_zone(self) -> tuple[str | None, str]:
+        """(zone, where it comes from): "location", or (None, "none") when the Base does not know where it is."""
+        try:
+            s = self.settings()
+        except ApiError:
+            s = None
+        z = self.located_zone(s)
+        return (z, "location") if z else (None, "none")
+
+    def use_zone_in_process(self, zone: str) -> None:
+        # This process keeps the zone it started with; dashboard times of the older BirdNET-Go layout need the new one.
+        os.environ["TZ"] = zone
+        time.tzset()
+
+    def birdnet_unit_text(self) -> tuple[str | None, str | None]:
+        """(text, path it came from) of BirdNET-Go's unit, or (None, None) when BirdNET-Go is not installed."""
+        for path in (self.cfg.birdnet_unit, self.cfg.birdnet_unit_lib):
+            try:
+                return Path(path).read_text(), path
+            except OSError:
+                continue
+        return None, None
+
+    def mark_notes_boundary(self, old_zone: str) -> None:
+        """Older BirdNET-Go (`notes` table) labels rows in its container's zone. Tell wdx-agent which rows were
+        written in the old zone, so ones not sent yet keep their true time (wdx-agent 0.4.6 notes_zone_before)."""
+        try:
+            s = self.settings()
+            db = open_ro(self.db_path(s))
+            try:
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                layout = getattr(self.agent, "birdnet_go_layout", lambda t: "notes" if "notes" in t else None)(tables)
+                last = db.execute("SELECT MAX(id) FROM notes").fetchone()[0] if layout == "notes" else None
+            finally:
+                db.close()
+        except (ApiError, sqlite3.Error, OSError):
+            return
+        if not last:
+            return
+        before = str(self.agent_ini().get("notes_zone_before", "") or "").strip()
+        value = ", ".join(v for v in (before, f"{int(last)} {old_zone}") if v)
+        with self.lock:
+            write_ini(self.cfg.agent_config, "agent", {"notes_zone_before": value})
+        log(f"BirdNET-Go notes up to id {last} were written in {old_zone} (notes_zone_before)")
+
+    def set_birdnet_zone(self, zone: str) -> tuple[bool, list[str]]:
+        """TZ of BirdNET-Go's container: rewrite its unit and restart it. (restarted, warnings)"""
+        text, src = self.birdnet_unit_text()
+        if text is None:
+            return False, []
+        old = unit_zone(text)
+        if old == zone:
+            return False, []
+        if old is None:
+            return False, [f"BirdNET-Go's service ({src}) sets no TZ; its times stay in UTC"]
+        svc = self.cfg.birdnet_service
+        self.run(["systemctl", "stop", svc], 120)   # no rows written in the old zone after the boundary below
+        self.mark_notes_boundary(old)
+        warnings = []
+        try:
+            write_atomic(self.cfg.birdnet_unit, set_unit_zone(text, zone).encode(), 0o644)
+        except OSError as e:
+            warnings.append(f"BirdNET-Go's service not changed: {e}")
+        self.run(["systemctl", "daemon-reload"], 60)
+        rc, out = self.run(["systemctl", "start", svc], 120)
+        if rc != 0:
+            warnings.append(f"BirdNET-Go not restarted: {out.strip()[:200] or 'systemctl not available'}")
+        if not warnings:
+            log(f"BirdNET-Go time zone {old} -> {zone} ({self.cfg.birdnet_unit})")
+        return rc == 0, warnings
+
+    def apply_timezone(self, reason: str) -> dict:
+        """Put the host and BirdNET-Go on the wanted zone. Does nothing when both are on it already."""
+        with self.tz_lock:
+            zone, source = self.wanted_zone()
+            res = {"zone": zone, "source": source, "changed": False, "birdnetRestarted": False, "warnings": []}
+            if not zone:
+                return res
+            current = self.system_zone()
+            if current != zone:
+                rc, out = self.run(["timedatectl", "set-timezone", zone], 30)
+                if rc != 0:
+                    res["warnings"].append(f"time zone not set to {zone}: {out.strip()[:200] or 'timedatectl not available'}")
+                else:
+                    log(f"time zone {current or 'unknown'} -> {zone} (from {source}, {reason})")
+                    res["changed"] = True
+                    if os.path.isfile(self.cfg.etc_timezone):   # Debian's older copy of the zone name
+                        try:
+                            write_atomic(self.cfg.etc_timezone, f"{zone}\n".encode(), 0o644)
+                        except OSError:
+                            pass
+                    self.use_zone_in_process(zone)
+            restarted, warnings = self.set_birdnet_zone(zone)
+            res["birdnetRestarted"] = restarted
+            res["changed"] = res["changed"] or restarted
+            res["warnings"] += warnings
+            if res["changed"]:
+                # wdx-agent reads BirdNET-Go's older layout in local time: it must run in the new zone too
+                self.run(["systemctl", "restart", self.cfg.agent_service], 60)
+            return res
 
     def clips_dir(self, s) -> str:
         return self.cfg.clips_dir or os.path.join(os.path.dirname(self.db_path(s)), "clips")
@@ -819,8 +990,13 @@ class App:
                 warnings.append(f"wdx-agent {agent_version} does not mark events as test; update it (run install.sh again). "
                                 "Wildlife Network is told about the test station separately.")
         notes: list[str] = []
+        tz = None
         if "latitude" in updates or "longitude" in updates:
-            notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"))
+            notes = self.set_birdnet_location(lat_lon.get("latitude"), lat_lon.get("longitude"), restart=False)
+            tz = self.apply_timezone("location saved")
+            warnings += tz["warnings"]
+            if self.birdnet_location_changed and not tz["birdnetRestarted"]:
+                notes += self.restart_birdnet()
         if updates:
             rc, out = self.run(["systemctl", "restart", self.cfg.agent_service], 60)
             if rc != 0:
@@ -832,6 +1008,8 @@ class App:
         except ApiError:
             configured = False
         res = {"ok": True, "configured": configured}
+        if tz and tz["zone"]:
+            res["timezone"] = tz["zone"]
         if warnings:
             res["warnings"] = warnings
         if notes:
