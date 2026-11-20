@@ -52,6 +52,8 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 3. how the Base gets internet: the APN of its SIM card for 4G, or a Wi-Fi network near it. Leave both empty if a phone will carry the data out;
 4. optional: tick **Test station** while you try the Base out (on a table, at home). Its detections are then kept apart and not shown on the public map, and the dashboard says "Test station, not on the public map". Untick it once the Base is in its real place.
 
+**Time zone.** Saving the location also sets the Base's time zone, so BirdNET-Go's own page, the BirdEcho Feed and Studio show detection times in local time (a new card starts on UTC). The zone is looked up on the Base itself, without internet, from a map of time zones bundled with it (`base/tzgrid.dat`, about 5 km cells; within a few km of a border between zones it can pick the neighbouring zone). The Base then sets the system zone (`timedatectl set-timezone`), changes `TZ` in BirdNET-Go's service and restarts BirdNET-Go and wdx-agent; the log says so (`journalctl -u wnbase`). The dashboard footer shows the zone in use. To choose the zone yourself, type it under **Advanced** in Setup (an IANA name such as `Asia/Kolkata`; empty means from the location), send `timezone` to `POST /api/config`, set `timezone =` under `[base]` in `/etc/wnbase/wnbase.ini`, or put `wildnetwork-timezone.txt` on the card (below). A zone set this way always wins over the looked-up one. A Base set up before version 0.2.2 switches by itself at its next start. Uploads are not affected: wdx-agent always sends true UTC times to Wildlife Network.
+
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
 The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet.py`) decides, and logs every switch and its reason with the tag `wn-net` (`journalctl -t wn-net`):
@@ -75,6 +77,16 @@ country=IN
 ```
 
 `country` (two letters) is optional. At the next start the Base saves this as its home Wi-Fi (the `wn-uplink` profile, other Wi-Fi profiles switched off) and then deletes the file, so the password does not stay on the card. It leaves `wildnetwork-wifi.txt.applied` with the network name and the result, never the password. A password must have 8 to 63 characters; a file without a usable network name or password is not applied, but is still removed.
+
+### Set the time zone from the SD card
+
+To give the Base a time zone other than the one of its location, create `wildnetwork-timezone.txt` on the boot partition with one line, for example:
+
+```text
+timezone=Asia/Kolkata
+```
+
+At the next start the Base stores it (as `[base] timezone` in `/etc/wnbase/wnbase.ini`), switches to it and renames the file to `wildnetwork-timezone.txt.applied` with the result, so a zone chosen later in Setup is not overwritten. `timezone=auto` goes back to the zone of the location. A name the Base does not know is not applied.
 
 ## Data pickup (Base without a connection)
 
@@ -221,10 +233,11 @@ No code needed.
  "configured": true, "deviceId": "wnb_1", "deploymentId": "wildnetwork-base:29ab78f229b9", "name": "Hill top", "latitude": 51.5, "longitude": -0.12,
  "registration": "registered",
  "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null},
- "test": false, "uplink": {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"}}
+ "test": false, "uplink": {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"},
+ "timezone": "Asia/Kolkata", "timezoneSource": "location", "timezoneSetting": null, "birdnetGoTimezone": "Asia/Kolkata"}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `deploymentId` is the id Wildlife Network files this Base's detections under (wdx-agent's `system` and station id), so an app can ask for them with `GET <site>/api/v1/events?deployment=<deploymentId>` when it cannot reach the Base. `test` is true for a test station (see `POST /api/config`). `uplink` is the active connection that carries traffic out (`type` `wifi`, `4g` or `ethernet`, the NetworkManager `profile`, and the `ssid` for Wi-Fi), or null while the Base only runs its hotspot. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `deploymentId` is the id Wildlife Network files this Base's detections under (wdx-agent's `system` and station id), so an app can ask for them with `GET <site>/api/v1/events?deployment=<deploymentId>` when it cannot reach the Base. `test` is true for a test station (see `POST /api/config`). `uplink` is the active connection that carries traffic out (`type` `wifi`, `4g` or `ethernet`, the NetworkManager `profile`, and the `ssid` for Wi-Fi), or null while the Base only runs its hotspot. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute. `timezone` is the Base's time zone now; `timezoneSource` is `location` (looked up from the coordinates), `setting` (chosen in Setup, `wnbase.ini` or `wildnetwork-timezone.txt`; `timezoneSetting` holds it, else null) or `system` (neither applies yet, for example before setup); `birdnetGoTimezone` is the `TZ` in BirdNET-Go's service, or null without BirdNET-Go.
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -235,8 +248,10 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 ```json
 {"name": "Hill top", "latitude": 51.5, "longitude": -0.12, "roundCoords": 2,
  "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wlnw.org/api/v1/events",
- "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false}
+ "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false, "timezone": "Asia/Kolkata"}
 ```
+
+`timezone` (optional) chooses the time zone instead of the one of the location: an IANA name, or `""` to go back to the location's. It is stored as `[base] timezone` in `/etc/wnbase/wnbase.ini`. When the location or `timezone` changes, the Base applies the zone (see [Time zone](#first-time-setup)) and the response has `"timezone"`.
 
 `test` (default off) makes this a **test station**: `test = yes` in `/etc/wdx-agent.ini`, so wdx-agent (0.4.4 or later) adds the top-level field `"test": true` to every event, and Wildlife Network keeps those events apart and never shows them publicly. Each change is also sent to Wildlife Network as `POST <site>/api/v1/devices/<deviceId>/settings` with `{"test": true|false}` and the device key (`Authorization: Bearer`). It waits in `/var/lib/wnbase/pending-settings.json` while the Base is offline or not registered yet, and is retried every 2 minutes until it is accepted.
 
@@ -308,13 +323,15 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
 | `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
+| `base/tzgrid.py`, `base/tzgrid.dat` | Offline time zone of a location (`/opt/wnbase/`): one IANA zone per 0.05 degree cell, gzip, 190 KB, standard library only |
+| `tools/build-tzgrid.py` | Rebuilds `base/tzgrid.dat` from [timezonefinder](https://github.com/jannikmi/timezonefinder) on a development machine (after a time zone border changes) |
 | `base/mic.py` | Picks BirdNET-Go's microphone (`/opt/wnbase/mic.py`); also used by wnbase for the microphone check |
 | `base/birdnet-go-check.sh` | Checks that BirdNET-Go's installer finished (used by `install.sh`) |
 | `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
-| `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit |
+| `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit (its `TZ` is the host's zone; wnbase changes it with the zone) |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
 | `systemd/` | `wnbase.service`, `wn-net.service`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
-| `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`) |
+| `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`; with timezonefinder installed, `test_timezone` also compares the bundled map with it) |
 
 `/etc/wnbase/wnbase.ini`:
 
@@ -331,6 +348,12 @@ clips_dir = /home/pi/birdnet-go-app/data/clips
 birdnet_config = /home/pi/birdnet-go-app/config/config.yaml
 birdnet_container = birdnet-go
 setup_code_file = /etc/wnbase/setup-code
+# BirdNET-Go's service, whose TZ follows the Base's time zone
+birdnet_unit = /etc/systemd/system/birdnet-go.service
+
+[base]
+# IANA time zone such as Asia/Kolkata; empty: looked up from the station location
+timezone =
 
 [hotspot]
 ifname = wlan0
