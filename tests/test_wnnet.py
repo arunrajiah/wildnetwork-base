@@ -266,7 +266,7 @@ class WifiFromCard(unittest.TestCase):
 class Install(unittest.TestCase):
     def test_service_replaces_the_hotspot_timer(self):
         prov = (ROOT / "base" / "provision.sh").read_text()
-        self.assertIn("UNITS=(wnbase.service wn-net.service wdx-agent.service)", prov)
+        self.assertIn("UNITS=(wnbase.service wn-net.service wdx-agent.service ", prov)
         self.assertIn("for u in wn-hotspot.timer wn-hotspot.service; do", prov)   # removed on re-runs
         self.assertIn("wnnet.py", prov)
         unit = (ROOT / "systemd" / "wn-net.service").read_text()

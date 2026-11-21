@@ -1,0 +1,10 @@
+[Unit]
+Description=Wildlife Network Base: check for updates 10 minutes after boot
+
+[Timer]
+# A separate timer: RandomizedDelaySec in wnbase-update.timer would also delay this one by up to 4 hours.
+OnBootSec=10min
+Unit=wnbase-update.service
+
+[Install]
+WantedBy=timers.target

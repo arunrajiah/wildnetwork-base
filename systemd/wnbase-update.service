@@ -1,0 +1,14 @@
+[Unit]
+Description=Wildlife Network Base: install new versions of the Base software and wdx-agent
+After=network-online.target wnbase.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Skips by itself when switched off in Setup or when the Base has no internet (hotspot only).
+ExecStart=/usr/bin/python3 /opt/wnbase/wnupdate.py --config /etc/wnbase/wnbase.ini
+User=root
+Nice=10
+TimeoutStartSec=30min
+SyslogIdentifier=wnbase-update
+Environment=PYTHONUNBUFFERED=1

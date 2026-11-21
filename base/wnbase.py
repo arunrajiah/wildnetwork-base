@@ -48,6 +48,10 @@ try:
     import tzgrid  # tzgrid.py + tzgrid.dat next to this file: offline time zone of a location
 except ImportError:
     tzgrid = None
+try:
+    import wnupdate  # wnupdate.py next to this file: automatic updates (its switch and last result)
+except ImportError:
+    wnupdate = None
 
 VERSION = "0.2.2"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I, L, O, 0 or 1
@@ -119,6 +123,8 @@ class Config:
         self.etc_timezone = g(w, "etc_timezone", "/etc/timezone")
         # [base] timezone: an IANA zone that wins over the one looked up from the location (empty: looked up)
         self.timezone = g(b, "timezone", "")
+        # [base] auto_update: install new versions of the Base software and wdx-agent by themselves (default yes)
+        self.auto_update = g(b, "auto_update", "yes")
         self.boot_dir = g(w, "boot_dir", "")   # empty: /boot/firmware or /boot, where config.txt is
         self.hotspot_ifname = g(h, "ifname", "wlan0")
         self.hotspot_ssid_prefix = g(h, "ssid_prefix", "Wildlife Network-")
@@ -714,7 +720,32 @@ class App:
             "test": self.test_mode(),
             "uplink": self.uplink(),
             **self.timezone_info(),
+            "update": self.update_info(),
         }
+
+    # --- automatic updates (wnupdate.py, run by wnbase-update.service) --------------------------------------
+
+    def auto_update(self) -> bool:
+        """[base] auto_update in wnbase.ini (read each time: Setup and wnupdate.py share the file)."""
+        raw = self.cfg.auto_update
+        if self.cfg.path:
+            cp = configparser.ConfigParser(interpolation=None)
+            cp.read(self.cfg.path)
+            raw = cp.get("base", "auto_update", fallback="")
+        return wnupdate.switch_on(raw) if wnupdate else str(raw).strip().lower() not in ("0", "no", "false", "off")
+
+    def store_auto_update(self, on: bool) -> None:
+        self.cfg.auto_update = "yes" if on else "no"
+        if self.cfg.path:
+            with self.lock:
+                write_ini(self.cfg.path, "base", {"auto_update": self.cfg.auto_update})
+        log(f"automatic updates {'on' if on else 'off'}")
+
+    def update_info(self) -> dict:
+        st = wnupdate.read_state(self.cfg.state_dir) if wnupdate else {}
+        return {"auto": self.auto_update(),
+                "current": {"wnbase": VERSION, "wdx-agent": getattr(self.agent, "VERSION", None)},
+                "latest": st.get("latest") or None, "lastCheck": st.get("lastCheck"), "lastResult": st.get("lastResult")}
 
     def start_timezone(self) -> threading.Thread:
         """At every start: a Base that knows its location (or has a zone set) but runs on another zone, such as one
@@ -1017,7 +1048,7 @@ class App:
 
     def configure(self, body: dict) -> dict:
         allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test",
-                   "timezone"}
+                   "timezone", "autoUpdate"}
         unknown = set(body) - allowed
         if unknown:
             raise ApiError(400, f"unknown field: {sorted(unknown)[0]}")
@@ -1065,6 +1096,8 @@ class App:
             if test != self.test_mode():
                 updates["test"] = "yes" if test else "no"
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
+        if "autoUpdate" in body and not isinstance(body["autoUpdate"], bool):
+            raise ApiError(400, "invalid autoUpdate: true or false")
         zone = False   # False: not given; None: back to the location's zone
         if "timezone" in body:
             v = body["timezone"]
@@ -1082,6 +1115,8 @@ class App:
                 raise ApiError(400, "invalid wifi: ssid 1 to 32 bytes, psk 8 to 63 characters")
 
         warnings: list[str] = []
+        if "autoUpdate" in body and body["autoUpdate"] != self.auto_update():
+            self.store_auto_update(body["autoUpdate"])
         if updates:
             with self.lock:
                 write_ini(self.cfg.agent_config, "agent", updates)
@@ -1422,6 +1457,8 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 <label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
 <label>Device id<input id="f-dev" spellcheck="false"></label>
 <label>Time zone<input id="f-tz" spellcheck="false" placeholder="from the location, for example Asia/Kolkata"></label>
+<label class="chk"><input type="checkbox" id="f-auto"> Keep the Base up to date automatically. It checks once a night and installs new versions of its own software by itself. If a new version does not start, the Base goes back to the one before.</label>
+<p class="sub" id="upd"></p>
 </details>
 <p><button class="primary" type="submit">Save</button> <button type="button" id="bngpw">Show BirdNET-Go password</button></p>
 <p class="sub" id="bngmsg"></p>
@@ -1431,7 +1468,7 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let audio=null,playing=null,filled=false,tzInit='';
+let audio=null,playing=null,filled=false,tzInit='',autoInit=true;
 async function j(url,opt){const r=await fetch(url,opt);const t=await r.json().catch(()=>({}));if(!r.ok)throw new Error(t.error||('HTTP '+r.status));return t}
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 function ago(iso){if(!iso)return 'never';const s=(Date.now()-new Date(iso).getTime())/1000;if(s<90)return 'just now';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
@@ -1442,10 +1479,11 @@ rp.className='reg '+(reg==='registered'?'ok':'wait');
 rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting-for-internet'?'Will connect to Wildlife Network when the Base has internet':reg==='waiting-for-setup'?'Will connect to Wildlife Network once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to Wildlife Network yet ('+reg.slice(7)+'). It keeps trying.':'';
 $('test').hidden=!i.test;const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
 $('mic').textContent=mc.found===false?'No microphone found. '+(mc.problem||'')+' Plug a USB microphone into the Base, then restart it.':'';
+const up=i.update||{};$('upd').textContent=up.lastCheck?'Last update check '+ago(up.lastCheck)+': '+(up.lastResult||'')+'.':'No update check yet.';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 const tzw={setting:'set in Setup',location:'from the location',system:'system setting'};
 $('foot').textContent=(i.timezone?'Time zone '+i.timezone+' ('+(tzw[i.timezoneSource]||i.timezoneSource)+')'+(i.birdnetGoTimezone&&i.birdnetGoTimezone!==i.timezone?', BirdNET-Go still on '+i.birdnetGoTimezone:'')+' . ':'')+'wnbase '+i.software.wnbase+' . wdx-agent '+(i.software['wdx-agent']||'?')+(i.software.birdnetGo?' . BirdNET-Go '+i.software.birdnetGo:'');
-if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';$('f-test').checked=!!i.test;tzInit=i.timezoneSetting||'';$('f-tz').value=tzInit;if(!i.configured)$('setup').open=true}}
+if(!filled){filled=true;$('f-name').value=i.name||'';$('f-lat').value=i.latitude??'';$('f-lon').value=i.longitude??'';$('f-dev').value=i.deviceId||'';$('f-test').checked=!!i.test;tzInit=i.timezoneSetting||'';$('f-tz').value=tzInit;const u=i.update||{};autoInit=u.auto!==false;$('f-auto').checked=autoInit;if(!i.configured)$('setup').open=true}}
 async function loadStatus(){const s=await j('/api/status');const h=$('health');h.replaceChildren();
 const b=s.battery;h.append(tile('Battery',b&&b.percent!=null?b.percent+'%'+(b.charging?' (charging)':''):'n/a'));
 h.append(tile('Storage free',s.storage?(s.storage.freeMb/1000).toFixed(1)+' GB':'n/a'));
@@ -1470,7 +1508,7 @@ $('form').onsubmit=async ev=>{ev.preventDefault();const m=$('fmsg');m.className=
 const v=id=>$(id).value.trim();if(v('f-name'))b.name=v('f-name');
 if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f-lon'))}
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
-if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;if(v('f-tz')!==tzInit)b.timezone=v('f-tz');
+if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;if(v('f-tz')!==tzInit)b.timezone=v('f-tz');if($('f-auto').checked!==autoInit)b.autoUpdate=$('f-auto').checked;
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
 m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.timezone?' Time zone '+r.timezone+'.':'')+(r.warnings?' '+r.warnings.join(' '):'');
 $('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};

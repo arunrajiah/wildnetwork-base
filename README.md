@@ -56,6 +56,8 @@ Each Base has its own hotspot and setup code. The label on the device shows:
 
 That is all. The Base then connects to Wildlife Network by itself: as soon as it has internet it registers as a new device and gets its own key, so nobody has to handle a key. The dashboard shows "Connected to Wildlife Network", or "Will connect to Wildlife Network when the Base has internet" until then. If you registered the Base yourself, put its key and device id under **Advanced**; a key that is already there is always kept.
 
+**Updates.** The Base keeps itself up to date: once a night, and 10 minutes after it starts, it installs new versions of its own software and of wdx-agent when it has internet (see [Automatic updates](#automatic-updates)). To stop that, untick **Keep the Base up to date automatically** under **Advanced** in Setup. The line under it says when it last checked and what happened.
+
 The hotspot is a fallback: home Wi-Fi comes first. `wn-net.service` (`base/wnnet.py`) decides, and logs every switch and its reason with the tag `wn-net` (`journalctl -t wn-net`):
 
 - **At boot** home Wi-Fi gets up to 90 seconds: the Base scans and tries its saved Wi-Fi network. Only if it is still not connected does the hotspot start. With no Wi-Fi network saved at all, the hotspot starts at once.
@@ -99,6 +101,28 @@ When the Base has no 4G or Wi-Fi, a phone carries the data out:
 
 If a step fails, nothing is lost: the same batch is offered again. Wildlife Network deduplicates by `eventId`, so sending a batch twice is harmless. If the Base's own uploader has already moved past the batch, the ack is accepted but the queue is not moved backwards.
 
+## Automatic updates
+
+A Base installs new versions of its own software by itself, so a Base out in the field does not keep running an old version. `wnbase-update.service` (`base/wnupdate.py`) runs once a night at a random time between 01:00 and 05:00 local time (`wnbase-update.timer`, `RandomizedDelaySec=4h`, so not every Base asks at once) and 10 minutes after every start (`wnbase-update-boot.timer`). It does nothing when the switch is off or when the Base has no internet connection of its own (hotspot only, or no network at all).
+
+What it updates:
+
+- **The Base software** (wnbase, the files in `/opt/wnbase` and its systemd units) from the newest release of this repository on GitHub. Each release carries `wnbase-<version>.tar.gz` (the repository at that tag, made by `git archive` in `.github/workflows/image.yml`) and `wnbase-<version>.tar.gz.sha256`. The Base downloads both over HTTPS, checks the sha256, checks that `base/wnbase.py` inside says the same version as the release tag and that every Python file compiles, and installs it with that release's own `base/provision.sh --update` (files and units only: no packages, no configs, nothing restarted). Pre-releases and drafts are never taken, and a version is never downgraded. Releases before 0.3.0 have no update file: a Base on 0.2.x needs one last manual update (run `install.sh` again, or flash 0.3.0), after which it updates itself.
+- **wdx-agent** from `<site>/agent/` (`VERSION`, then `wdx_agent.py`; `<site>` is the Wildlife Network address in `/etc/wdx-agent.ini`). The `VERSION = "..."` inside the downloaded file must match, it must be wdx-agent and it must compile.
+- **Not** BirdNET-Go: it stays at the release pinned in `image/VERSIONS`, whose database layout wdx-agent is tested against. **Not** the operating system either.
+
+**Safety.** The previous version stays on disk (`/opt/wnbase.prev`, with copies of the units, and `/opt/wdx-agent/wdx_agent.py.prev`). After installing, the Base restarts the service and waits up to 90 seconds for it to come up with the new version: wnbase must answer `/api/info` with it, and a running wdx-agent must log it at start (`wdx-agent X source=...`, read from that run of the service only); wnbase is restarted after a wdx-agent update too, because it loads wdx-agent's code. If not, the previous version is put back and restarted. `/etc/wdx-agent.ini`, `/etc/wnbase/wnbase.ini`, keys, the setup code, the time zone and Wi-Fi are never touched. `wn-net` is restarted only when `wnnet.py` changed; it leaves a working home Wi-Fi connection as it is.
+
+**Switch.** Setup > Advanced > **Keep the Base up to date automatically** (on by default), `"autoUpdate": true|false` in `POST /api/config`, or `auto_update = yes|no` under `[base]` in `/etc/wnbase/wnbase.ini`. Running it by hand always goes ahead, also when switched off:
+
+```sh
+sudo /opt/wnbase/wnupdate.py --now      # check and install now
+sudo /opt/wnbase/wnupdate.py --check    # only look up the newest versions
+journalctl -t wnbase-update             # every check and update, with the reason for a rollback
+```
+
+The last result is kept in `/var/lib/wnbase/update.json` and shown in `/api/info` as `update`.
+
 ## Security notes
 
 - The hotspot password and the setup code are different on every Base and are made on the device the first time it starts (`/etc/wnbase/setup-code`, readable by root only).
@@ -107,6 +131,7 @@ If a step fails, nothing is lost: the same batch is offered again. Wildlife Netw
 - The Wildlife Network API key never leaves the Base through this API: it is written to `/etc/wdx-agent.ini` and is not returned by any endpoint or written to the log.
 - Health reports (see [Health reports](#health-reports)) carry no audio, no detections and no location.
 - `wildnetwork-wifi.txt` on the boot partition is read once at boot and deleted; the password is not kept on the card.
+- Automatic updates come only over HTTPS from this repository's GitHub releases (checked against the sha256 published with the release) and from `<site>/agent/`. The sha256 guards against a broken or cut-off download; it comes from the same release, so it does not protect against someone who controls the GitHub repository. Switch updates off in Setup if you prefer to update by hand.
 - Coordinates in uploaded events are rounded on the device (`roundCoords`, default 2 decimals, about 1 km).
 - Reading endpoints need no code: anyone who knows the hotspot password can see the dashboard. Keep the label out of sight on public sites.
 - **BirdNET-Go's page on port 8080** uses BirdNET-Go's own login (`security.basicauth`), switched on by `base/bngauth.py` at install and first boot with a random password in `/etc/wnbase/birdnet-go-password` (root only). The dashboard shows it after the setup code (**Show BirdNET-Go password** in Setup, or `POST /api/birdnet-go-password` with `X-Setup-Code`). A password you set in BirdNET-Go yourself is kept.
@@ -131,7 +156,7 @@ The installer:
 - installs BirdNET-Go with its official installer (the one from the pinned release's tag, Docker based, data in `~/birdnet-go-app/data/birdnet.db` and clips in `~/birdnet-go-app/data/clips`) unless it is already there, then checks that the `birdnet-go` container and `~/birdnet-go-app/config/config.yaml` exist. If either is missing it stops with an error and the command to run again. The official installer calls `sudo` itself: when that would ask for a password, `install.sh` asks for it first, or stops with a clear message when there is no terminal (run it from an SSH session with a terminal);
 - sets BirdNET-Go's microphone (see [The microphone](#the-microphone)) and restarts BirdNET-Go when it changed;
 - writes `/etc/wdx-agent.ini` (source `birdnet-go`) and `/etc/wnbase/wnbase.ini` if they do not exist;
-- installs and enables `wnbase.service`, `wn-net.service` (home Wi-Fi first, hotspot as fallback; it replaces the older `wn-hotspot.service` and `wn-hotspot.timer`, which are removed) and `wdx-agent.service`;
+- installs and enables `wnbase.service`, `wn-net.service` (home Wi-Fi first, hotspot as fallback; it replaces the older `wn-hotspot.service` and `wn-hotspot.timer`, which are removed), `wdx-agent.service` and the [automatic update](#automatic-updates) timers;
 - prints the hotspot name, its password and the setup code;
 - keeps the system journal on the card across reboots and power cuts (`/etc/systemd/journald.conf.d/wnbase.conf`: `Storage=persistent`, at most 200 MB), so `journalctl -b -1` shows what happened before the last restart;
 - writes everything it prints to `/var/log/wnbase-install.log` (appended on every run, readable by the Base's user without sudo) and prints that path at the end, also when it stops with an error.
@@ -234,10 +259,12 @@ No code needed.
  "registration": "registered",
  "microphone": {"found": true, "device": ":1,0", "devices": [":1,0 (USB Lavalier Microphone, USB)"], "problem": null},
  "test": false, "uplink": {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"},
- "timezone": "Asia/Kolkata", "timezoneSource": "location", "timezoneSetting": null, "birdnetGoTimezone": "Asia/Kolkata"}
+ "timezone": "Asia/Kolkata", "timezoneSource": "location", "timezoneSetting": null, "birdnetGoTimezone": "Asia/Kolkata",
+ "update": {"auto": true, "current": {"wnbase": "0.3.0", "wdx-agent": "0.4.6"}, "latest": {"wnbase": "0.3.0", "wdx-agent": "0.4.6"},
+            "lastCheck": "2026-11-21T02:14:09Z", "lastResult": "up to date"}}
 ```
 
-`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `deploymentId` is the id Wildlife Network files this Base's detections under (wdx-agent's `system` and station id), so an app can ask for them with `GET <site>/api/v1/events?deployment=<deploymentId>` when it cannot reach the Base. `test` is true for a test station (see `POST /api/config`). `uplink` is the active connection that carries traffic out (`type` `wifi`, `4g` or `ethernet`, the NetworkManager `profile`, and the `ssid` for Wi-Fi), or null while the Base only runs its hotspot. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute. `timezone` is the Base's time zone now; `timezoneSource` is `location` (looked up from the coordinates), `setting` (chosen in Setup, `wnbase.ini` or `wildnetwork-timezone.txt`; `timezoneSetting` holds it, else null) or `system` (neither applies yet, for example before setup); `birdnetGoTimezone` is the `TZ` in BirdNET-Go's service, or null without BirdNET-Go.
+`configured` is true once the location is set. `registration` is `registered`, `waiting-for-setup` (no name or location yet), `waiting-for-internet`, or `error: <reason>` (for example too many new devices from one network in a day; it retries every hour). The key itself is never returned. `deploymentId` is the id Wildlife Network files this Base's detections under (wdx-agent's `system` and station id), so an app can ask for them with `GET <site>/api/v1/events?deployment=<deploymentId>` when it cannot reach the Base. `test` is true for a test station (see `POST /api/config`). `uplink` is the active connection that carries traffic out (`type` `wifi`, `4g` or `ethernet`, the NetworkManager `profile`, and the `ssid` for Wi-Fi), or null while the Base only runs its hotspot. `microphone.found` is `false` when BirdNET-Go has no active audio source (newest of its log lines "starting without active audio sources" and "capture started"), when `arecord -l` lists no capture device, or when the configured `device` names a card that cannot record; `null` when none of that can be checked. `problem` says which. Checked at most once a minute. `timezone` is the Base's time zone now; `timezoneSource` is `location` (looked up from the coordinates), `setting` (chosen in Setup, `wnbase.ini` or `wildnetwork-timezone.txt`; `timezoneSetting` holds it, else null) or `system` (neither applies yet, for example before setup); `birdnetGoTimezone` is the `TZ` in BirdNET-Go's service, or null without BirdNET-Go. `update` is about [automatic updates](#automatic-updates): `auto` is the switch, `current` the versions running, `latest` the newest found at the last check (null before the first), `lastCheck` when it last ran and `lastResult` what happened: `up to date`, `updated wnbase 0.2.2 -> 0.3.0`, `updated wdx-agent 0.4.6 -> 0.4.7`, `rolled back: ...`, `skipped: ...` (switched off, or no internet) or `error: ...` (nothing was changed).
 
 **Registration.** While the agent config has a name and location but no `api_key`, wnbase calls `POST <endpoint base>/api/v1/devices` with `{"name", "model": "wildnetwork-base", "hardwareId"}` every 5 minutes (backing off to 1 hour after failures, and waiting an hour after a `429`), writes the returned `api_key`, `device_id` and `system = wildnetwork-base` to `/etc/wdx-agent.ini`, and restarts wdx-agent. Saving the setup triggers an attempt straight away. `birdnetGo` is the BirdNET-Go image tag, or null.
 
@@ -248,8 +275,10 @@ Header `X-Setup-Code`. Every field is optional; only the fields sent are changed
 ```json
 {"name": "Hill top", "latitude": 51.5, "longitude": -0.12, "roundCoords": 2,
  "apiKey": "wn_...", "deviceId": "wnb_1", "endpoint": "https://wlnw.org/api/v1/events",
- "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false, "timezone": "Asia/Kolkata"}
+ "apn": "internet", "wifi": {"ssid": "Farm office", "psk": "secret123"}, "test": false, "timezone": "Asia/Kolkata", "autoUpdate": true}
 ```
+
+`autoUpdate` (default on) switches [automatic updates](#automatic-updates) on or off: `auto_update = yes|no` under `[base]` in `/etc/wnbase/wnbase.ini`.
 
 `timezone` (optional) chooses the time zone instead of the one of the location: an IANA name, or `""` to go back to the location's. It is stored as `[base] timezone` in `/etc/wnbase/wnbase.ini`. When the location or `timezone` changes, the Base applies the zone (see [Time zone](#first-time-setup)) and the response has `"timezone"`.
 
@@ -320,6 +349,7 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/wnbase.py` | Dashboard and local API (`/opt/wnbase/wnbase.py`) |
 | `base/wnnet.py` | Home Wi-Fi first, hotspot as fallback (`wn-net.service`) |
 | `base/hotspot.sh` | Starts the hotspot now, by hand (`/opt/wnbase/hotspot.sh`) |
+| `base/wnupdate.py` | Automatic updates of the Base software and wdx-agent, with rollback (`/opt/wnbase/wnupdate.py`, `wnbase-update.service`) |
 | `install.sh` | Installer for a stock Raspberry Pi |
 | `base/provision.sh` | Steps shared by `install.sh` and the image build |
 | `base/bngauth.py` | Turns on BirdNET-Go's login with a password of this Base (`/opt/wnbase/bngauth.py`) |
@@ -330,7 +360,9 @@ The dashboard: health, the last 24 hours of detections with play buttons, and th
 | `base/setup-file.sh` | Writes `wildnetwork-setup.txt` to the boot partition (first boot and `install.sh`) |
 | `base/firstboot.sh`, `base/ssh-key.sh`, `base/birdnet-go-unit.sh` | Image only: first boot, SSH from the boot partition, BirdNET-Go unit (its `TZ` is the host's zone; wnbase changes it with the zone) |
 | `image/` | SD card image: `build.sh`, `VERSIONS`, pi-gen stage |
-| `systemd/` | `wnbase.service`, `wn-net.service`, `wdx-agent.service`, `wn-firstboot.service`, `wn-ssh-key.service` |
+| `systemd/` | `wnbase.service`, `wn-net.service`, `wdx-agent.service`, `wnbase-update.service` with `wnbase-update.timer` (nightly) and `wnbase-update-boot.timer` (after boot), `wn-firstboot.service`, `wn-ssh-key.service` |
+| `/var/lib/wnbase/update.json` | Last update check: `lastCheck`, `lastResult`, `latest` |
+| `/opt/wnbase.prev`, `/opt/wdx-agent/wdx_agent.py.prev` | The version before the last automatic update |
 | `tests/` | `python3 -m unittest discover -s tests` (needs wdx-agent checked out next to this repo, or `WDX_AGENT_PY`; with timezonefinder installed, `test_timezone` also compares the bundled map with it) |
 
 `/etc/wnbase/wnbase.ini`:
@@ -354,6 +386,8 @@ birdnet_unit = /etc/systemd/system/birdnet-go.service
 [base]
 # IANA time zone such as Asia/Kolkata; empty: looked up from the station location
 timezone =
+# no: do not install new versions of the Base software and wdx-agent by themselves
+auto_update = yes
 
 [hotspot]
 ifname = wlan0
