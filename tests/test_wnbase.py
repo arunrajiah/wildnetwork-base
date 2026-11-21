@@ -534,3 +534,41 @@ class Uplink(unittest.TestCase):
         app = wnbase.App(wnbase.Config(None, agent_config=f"{tmp}/ini", agent_module=AGENT, setup_code_file=f"{tmp}/code",
                                        state_dir=f"{tmp}/state", avahi_service_file=""), runner=run)
         self.assertEqual(app.info()["uplink"], {"type": "wifi", "profile": "wn-uplink", "ssid": "Farm office"})
+
+
+class AutoUpdate(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        make_db(f"{self.tmp}/birdnet.db")
+        self.ini = f"{self.tmp}/wdx-agent.ini"
+        Path(self.ini).write_text(f"[agent]\nendpoint = https://example.org/api/v1/events\nsource = birdnet-go\n"
+                                  f"path = {self.tmp}/birdnet.db\nstate_file = {self.tmp}/state.json\n")
+        self.wnini = f"{self.tmp}/wnbase.ini"
+        Path(self.wnini).write_text("[base]\ntimezone =\n")
+        cfg = wnbase.Config(self.wnini, agent_config=self.ini, agent_module=AGENT, setup_code_file=f"{self.tmp}/code",
+                            state_dir=f"{self.tmp}/state", avahi_service_file="")
+        self.app = wnbase.App(cfg, runner=lambda a, t=30: (127, ""))
+
+    def test_default_on_and_switch(self):
+        up = self.app.info()["update"]
+        self.assertIs(up["auto"], True)
+        self.assertEqual(up["current"]["wnbase"], wnbase.VERSION)
+        self.assertIsNone(up["lastCheck"])
+        self.app.configure({"autoUpdate": False})
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(self.wnini)
+        self.assertEqual(cp["base"]["auto_update"], "no")
+        self.assertEqual(cp["base"]["timezone"], "")            # other keys kept
+        self.assertIs(self.app.info()["update"]["auto"], False)
+        self.app.configure({"autoUpdate": True})
+        self.assertIs(self.app.info()["update"]["auto"], True)
+        with self.assertRaises(wnbase.ApiError):
+            self.app.configure({"autoUpdate": "yes"})
+        self.assertIn("Keep the Base up to date automatically", wnbase.DASHBOARD)
+
+    def test_reports_last_result(self):
+        os.makedirs(f"{self.tmp}/state")
+        Path(f"{self.tmp}/state/update.json").write_text(json.dumps(
+            {"lastCheck": "2026-11-21T02:14:00Z", "lastResult": "up to date", "latest": {"wnbase": "0.3.0"}}))
+        up = self.app.info()["update"]
+        self.assertEqual((up["lastCheck"], up["lastResult"], up["latest"]), ("2026-11-21T02:14:00Z", "up to date", {"wnbase": "0.3.0"}))

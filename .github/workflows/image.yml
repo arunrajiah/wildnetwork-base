@@ -13,6 +13,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The update file each Base downloads by itself (wnupdate.py): the repository at the tag, with its sha256. A job of
+  # its own, so it is on the release within a minute instead of after the image build.
+  update-file:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make the update file
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          grep -qx "VERSION = \"$ver\"" base/wnbase.py || { echo "Tag $GITHUB_REF_NAME does not match VERSION in base/wnbase.py"; exit 1; }
+          git archive --format=tar.gz --prefix="wildnetwork-base-$ver/" -o "wnbase-$ver.tar.gz" HEAD
+          sha256sum "wnbase-$ver.tar.gz" > "wnbase-$ver.tar.gz.sha256"
+          cat "wnbase-$ver.tar.gz.sha256"
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wnbase-*.tar.gz
+            wnbase-*.tar.gz.sha256
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 240

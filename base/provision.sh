@@ -3,11 +3,13 @@
 #   provision.sh --live    on a running Raspberry Pi: also reloads systemd and (re)starts the services
 #   provision.sh --image   inside the image chroot: installs and enables only; nothing is started,
 #                          no setup code is made (each Base makes its own at first boot)
+#   provision.sh --update  run by wnupdate.py with a new release: only the Base files and units, then daemon-reload;
+#                          no packages, no wdx-agent download, configs untouched, nothing (re)started
 # Environment: WN_USER (required), WN_BASE_URL, WN_SRC (repository root; default: the folder above this script).
 set -euo pipefail
 
 MODE="${1:-}"
-case "$MODE" in --live|--image) ;; *) echo "usage: $0 --live|--image"; exit 2 ;; esac
+case "$MODE" in --live|--image|--update) ;; *) echo "usage: $0 --live|--image|--update"; exit 2 ;; esac
 say() { printf '\033[1;36m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
 
@@ -18,6 +20,7 @@ RUN_GROUP="$(id -gn "$RUN_USER")"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 APP_DIR="$RUN_HOME/birdnet-go-app"
 
+if [ "$MODE" != --update ]; then
 # --- packages ------------------------------------------------------------------------------------------------
 # dnsmasq-base: NetworkManager needs it for the hotspot's DHCP (shared mode). alsa-utils: microphone detection.
 # avahi-daemon: <host>.local and the _wlnw-base._tcp service that apps look for.
@@ -49,11 +52,15 @@ else
   rm -f "$tmp"; echo "Could not get wdx_agent.py (offline?). Put a copy next to install.sh and run again."; exit 1
 fi
 rm -f "$tmp"
+fi
 
 # --- wnbase --------------------------------------------------------------------------------------------------
-for f in wnbase.py mic.py bngauth.py wnnet.py tzgrid.py tzgrid.dat hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh setup-file.sh; do
+install -d -m 755 /opt/wnbase
+for f in wnbase.py wnupdate.py mic.py bngauth.py wnnet.py tzgrid.py tzgrid.dat hotspot.sh firstboot.sh ssh-key.sh birdnet-go-unit.sh birdnet-go-check.sh setup-file.sh; do
   install -m 755 "$SRC/base/$f" "/opt/wnbase/$f"
 done
+
+if [ "$MODE" != --update ]; then
 
 # --- configs (kept when present) -----------------------------------------------------------------------------
 if [ ! -f /etc/wdx-agent.ini ]; then
@@ -103,6 +110,8 @@ setup_code_file = /etc/wnbase/setup-code
 [base]
 # Time zone of the Base and BirdNET-Go, an IANA name such as Asia/Kolkata. Empty: looked up from the station location.
 timezone =
+# no: do not install new versions of the Base software and wdx-agent by themselves (Setup > Advanced)
+auto_update = yes
 
 [hotspot]
 ifname = wlan0
@@ -126,6 +135,7 @@ if [ "$MODE" = --live ]; then
   systemctl restart systemd-journald || true
   journalctl --flush >/dev/null 2>&1 || true
 fi
+fi
 
 # --- services ------------------------------------------------------------------------------------------------
 # The hotspot used to be started by wn-hotspot.service and a timer, and its profile connected by itself, so after a
@@ -135,12 +145,13 @@ for u in wn-hotspot.timer wn-hotspot.service; do
   [ "$MODE" = --live ] && systemctl stop "$u" >/dev/null 2>&1 || true
   rm -f "/etc/systemd/system/$u"
 done
-for u in wnbase.service wn-net.service; do
+for u in wnbase.service wn-net.service wnbase-update.service wnbase-update.timer wnbase-update-boot.timer; do
   install -m 644 "$SRC/systemd/$u" /etc/systemd/system/
 done
 sed "s/__USER__/$RUN_USER/" "$SRC/systemd/wdx-agent.service" > /etc/systemd/system/wdx-agent.service
 chmod 644 /etc/systemd/system/wdx-agent.service
-UNITS=(wnbase.service wn-net.service wdx-agent.service)
+# Automatic updates: once a night at a random time and 10 minutes after boot (wnupdate.py; off in Setup).
+UNITS=(wnbase.service wn-net.service wdx-agent.service wnbase-update.timer wnbase-update-boot.timer)
 if [ "$MODE" = --image ]; then
   for u in wn-firstboot.service wn-ssh-key.service; do
     sed "s/__USER__/$RUN_USER/" "$SRC/systemd/$u" > "/etc/systemd/system/$u"
@@ -154,6 +165,12 @@ UNITS+=(NetworkManager-wait-online.service)
 # Works in a chroot too: enabling only writes the symlinks.
 systemctl enable "${UNITS[@]}" >/dev/null 2>&1
 
+if [ "$MODE" = --update ]; then
+  systemctl daemon-reload
+  # The timers themselves: enabling does not start a timer on a running system.
+  systemctl start wnbase-update.timer wnbase-update-boot.timer >/dev/null 2>&1 || true
+fi
+
 if [ "$MODE" = --live ]; then
   systemctl daemon-reload
   # Also fixes an existing hotspot profile (autoconnect no). On a Base installed over Wi-Fi it finds home Wi-Fi
@@ -161,4 +178,5 @@ if [ "$MODE" = --live ]; then
   systemctl restart wn-net.service
   systemctl restart wnbase.service
   systemctl restart wdx-agent.service || true
+  systemctl start wnbase-update.timer wnbase-update-boot.timer >/dev/null 2>&1 || true
 fi
