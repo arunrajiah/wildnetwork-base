@@ -65,6 +65,7 @@ REGISTER_MAX_BACKOFF = 3600
 HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
 HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
+ALERTS_FOREVER = "2099-01-01T00:00:00Z"   # "until I turn them back on"
 TZ_FILE = "wildnetwork-timezone.txt"
 TZ_AUTO = ("", "auto", "automatic", "location")
 TZ_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}")
@@ -721,7 +722,61 @@ class App:
             "uplink": self.uplink(),
             **self.timezone_info(),
             "update": self.update_info(),
+            "alerts": self.alerts_info(),
         }
+
+    # --- pausing Wildlife Network's alert emails about this Base ------------------------------------------
+
+    def alerts_path(self) -> str:
+        return os.path.join(self.cfg.state_dir, "alerts.json")
+
+    @staticmethod
+    def parse_pause(v) -> str | None:
+        """alertsPausedUntil: an ISO time with a zone (normalised to UTC, whole seconds) or None (alerts back on)."""
+        if v is None:
+            return None
+        if not isinstance(v, str) or len(v) > 40:
+            raise ApiError(400, "invalid alertsPausedUntil: an ISO time such as 2026-12-01T00:00:00Z, or null")
+        try:
+            dt = datetime.fromisoformat(v.strip().replace("Z", "+00:00").replace("z", "+00:00"))
+        except ValueError:
+            raise ApiError(400, "invalid alertsPausedUntil: an ISO time such as 2026-12-01T00:00:00Z, or null")
+        if dt.tzinfo is None:
+            raise ApiError(400, "invalid alertsPausedUntil: give the time zone, for example a Z at the end")
+        dt = dt.astimezone(timezone.utc)
+        if dt.timestamp() <= time.time():
+            raise ApiError(400, "alertsPausedUntil is in the past; send null to turn alerts back on")
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def pause_alerts(self, until: str | None) -> None:
+        """Keep the choice locally (shown in the dashboard) and queue it for Wildlife Network."""
+        with self.lock:
+            os.makedirs(self.cfg.state_dir, exist_ok=True)
+            write_atomic(self.alerts_path(), json.dumps({"alertsPausedUntil": until, "changedAt": iso_utc(time.time())}).encode(),
+                         0o644)
+        self.queue_settings({"alertsPausedUntil": until})
+        log(f"alert emails {'paused until ' + until if until else 'back on'}")
+        self.reg_wake.set()   # send it now rather than at the next registration check
+
+    def alerts_info(self) -> dict:
+        """What was last chosen; `sent` is false while it still waits in the queue for Wildlife Network."""
+        try:
+            st = json.loads(Path(self.alerts_path()).read_text())
+        except (OSError, ValueError):
+            st = {}
+        until = st.get("alertsPausedUntil")
+        paused = False
+        if isinstance(until, str):
+            try:
+                paused = datetime.fromisoformat(until.replace("Z", "+00:00")).timestamp() > time.time()
+            except ValueError:
+                until = None
+        try:
+            pending = "alertsPausedUntil" in json.loads(Path(self.pending_settings_path()).read_text())
+        except (OSError, ValueError):
+            pending = False
+        return {"paused": paused, "pausedUntil": until if paused else None,
+                "forever": paused and until >= ALERTS_FOREVER[:4], "sent": not pending}
 
     # --- automatic updates (wnupdate.py, run by wnbase-update.service) --------------------------------------
 
@@ -1048,7 +1103,7 @@ class App:
 
     def configure(self, body: dict) -> dict:
         allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test",
-                   "timezone", "autoUpdate"}
+                   "timezone", "autoUpdate", "alertsPausedUntil"}
         unknown = set(body) - allowed
         if unknown:
             raise ApiError(400, f"unknown field: {sorted(unknown)[0]}")
@@ -1096,6 +1151,7 @@ class App:
             if test != self.test_mode():
                 updates["test"] = "yes" if test else "no"
         apn = text("apn", r"[A-Za-z0-9._-]{1,63}", 63) if "apn" in body else None
+        pause = self.parse_pause(body["alertsPausedUntil"]) if "alertsPausedUntil" in body else False
         if "autoUpdate" in body and not isinstance(body["autoUpdate"], bool):
             raise ApiError(400, "invalid autoUpdate: true or false")
         zone = False   # False: not given; None: back to the location's zone
@@ -1115,6 +1171,8 @@ class App:
                 raise ApiError(400, "invalid wifi: ssid 1 to 32 bytes, psk 8 to 63 characters")
 
         warnings: list[str] = []
+        if pause is not False:
+            self.pause_alerts(pause)
         if "autoUpdate" in body and body["autoUpdate"] != self.auto_update():
             self.store_auto_update(body["autoUpdate"])
         if updates:
@@ -1424,7 +1482,7 @@ button{font:inherit;color:var(--text);background:#22302a;border:1px solid var(--
 button.play{width:44px;height:40px;padding:0;flex:none}button.primary{background:var(--accent);color:#06140d;border:0;font-weight:600}
 details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:22px}
 summary{cursor:pointer;font-weight:600}label{display:block;margin-top:10px;font-size:.85rem;color:var(--dim)}
-input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:4px}
+input,select{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:4px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.msg{margin-top:10px;font-size:.9rem}.err{color:var(--bad)}.okc{color:var(--accent)}
 .empty{color:var(--dim);padding:14px 4px}h3{font-size:.95rem;margin:18px 0 0}details.adv{background:none;border:0;padding:0;margin-top:14px}
 .reg{margin:6px 0 0;font-size:.9rem}.reg.ok{color:var(--accent)}.reg.wait{color:var(--warn)}.reg.bad{color:var(--bad);font-weight:600}
@@ -1452,6 +1510,10 @@ label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(
 <label>4G: APN from your SIM provider<input id="f-apn" spellcheck="false" placeholder="for example internet"></label>
 <div class="row"><label>Wi-Fi network<input id="f-ssid" spellcheck="false"></label><label>Wi-Fi password<input id="f-psk" type="password"></label></div>
 <label class="chk"><input type="checkbox" id="f-test"> Test station: detections are kept apart and not shown on the public map. Turn it off when the Base is in its real place.</label>
+<h3>Alert emails</h3>
+<p class="sub">Switching the Base off for a while? Pause the emails about it (no signal, microphone, temperature).</p>
+<p class="sub" id="alerts"></p>
+<label>Alert emails<select id="f-pause"><option value="">Keep as they are</option><option value="1">Pause for 1 day</option><option value="7">Pause for 1 week</option><option value="30">Pause for 1 month</option><option value="forever">Pause until I turn them back on</option><option value="on">Turn alerts back on</option></select></label>
 <details class="adv"><summary>Advanced</summary>
 <p class="sub">Only needed if you registered this Base yourself. Otherwise it gets its own key from Wildlife Network.</p>
 <label>Wildlife Network API key<input id="f-key" type="password" placeholder="unchanged" spellcheck="false"></label>
@@ -1479,6 +1541,7 @@ rp.className='reg '+(reg==='registered'?'ok':'wait');
 rp.textContent=reg==='registered'?'Connected to Wildlife Network':reg==='waiting-for-internet'?'Will connect to Wildlife Network when the Base has internet':reg==='waiting-for-setup'?'Will connect to Wildlife Network once it has a name and location (see Setup below)':reg.startsWith('error: ')?'Not connected to Wildlife Network yet ('+reg.slice(7)+'). It keeps trying.':'';
 $('test').hidden=!i.test;const mc=i.microphone||{};$('mic').hidden=mc.found!==false;
 $('mic').textContent=mc.found===false?'No microphone found. '+(mc.problem||'')+' Plug a USB microphone into the Base, then restart it.':'';
+const al=i.alerts||{};$('alerts').textContent=(al.paused?(al.forever?'Alert emails are paused until you turn them back on.':'Alert emails are paused until '+new Date(al.pausedUntil).toLocaleString()+'.'):'Alert emails are on.')+(al.sent===false?' Wildlife Network gets this change when the Base is online.':'');
 const up=i.update||{};$('upd').textContent=up.lastCheck?'Last update check '+ago(up.lastCheck)+': '+(up.lastResult||'')+'.':'No update check yet.';
 $('hw').textContent='Hardware '+i.hardwareId+(i.configured?'':' . not set up yet');
 const tzw={setting:'set in Setup',location:'from the location',system:'system setting'};
@@ -1509,9 +1572,10 @@ const v=id=>$(id).value.trim();if(v('f-name'))b.name=v('f-name');
 if(v('f-lat')||v('f-lon')){b.latitude=Number(v('f-lat'));b.longitude=Number(v('f-lon'))}
 if(v('f-key'))b.apiKey=v('f-key');if(v('f-dev'))b.deviceId=v('f-dev');if(v('f-apn'))b.apn=v('f-apn');
 if(v('f-ssid'))b.wifi={ssid:v('f-ssid'),psk:$('f-psk').value};b.test=$('f-test').checked;if(v('f-tz')!==tzInit)b.timezone=v('f-tz');if($('f-auto').checked!==autoInit)b.autoUpdate=$('f-auto').checked;
+const pz=$('f-pause').value;if(pz==='on')b.alertsPausedUntil=null;else if(pz==='forever')b.alertsPausedUntil='%%FOREVER%%';else if(pz)b.alertsPausedUntil=new Date(Date.now()+Number(pz)*86400000).toISOString();
 try{const r=await j('/api/config',{method:'POST',headers:{'content-type':'application/json','x-setup-code':v('f-code')},body:JSON.stringify(b)});
 m.className='msg okc';m.textContent='Saved.'+(r.configured?' The Base is set up and connects to Wildlife Network by itself when it has internet.':' The location is still needed.')+(r.timezone?' Time zone '+r.timezone+'.':'')+(r.warnings?' '+r.warnings.join(' '):'');
-$('f-key').value='';$('f-psk').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
+$('f-key').value='';$('f-psk').value='';$('f-pause').value='';filled=false;refresh()}catch(e){m.className='msg err';m.textContent=e.message}};
 $('bngpw').onclick=async()=>{const m=$('bngmsg');try{const r=await j('/api/birdnet-go-password',{method:'POST',headers:{'x-setup-code':$('f-code').value.trim()}});
 m.textContent='BirdNET-Go settings (port 8080) password: '+r.password}catch(e){m.textContent=e.message}};
 $('geo').onclick=()=>{const g=$('geomsg');
@@ -1521,7 +1585,7 @@ e=>{g.textContent='Could not get the location'+(window.isSecureContext?'':' (man
 refresh();setInterval(refresh,30000);
 </script></body></html>
 """
-DASHBOARD = DASHBOARD.replace("%%LOGO%%", LOGO_SVG).replace(
+DASHBOARD = DASHBOARD.replace("%%LOGO%%", LOGO_SVG).replace("%%FOREVER%%", ALERTS_FOREVER).replace(
     "%%FAVICON%%", "data:image/svg+xml," + quote(LOGO_SVG, safe="=:/,.-'()"))
 
 
