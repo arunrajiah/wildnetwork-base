@@ -424,6 +424,49 @@ class TestStation(unittest.TestCase):
         self.assertIs(ev["test"], True)
 
 
+    def test_pause_alerts_queued_and_retried(self):
+        self.assertEqual(self.app.info()["alerts"], {"paused": False, "pausedUntil": None, "forever": False, "sent": True})
+        self.reply = OSError("offline")
+        self.app.configure({"alertsPausedUntil": "2099-01-01T00:00:00Z"})
+        self.assertFalse(self.app.sync_settings())
+        a = self.app.info()["alerts"]
+        self.assertEqual((a["paused"], a["pausedUntil"], a["forever"], a["sent"]), (True, "2099-01-01T00:00:00Z", True, False))
+        self.reply = (200, {"ok": True})
+        self.assertTrue(self.app.sync_settings())
+        self.assertEqual(self.posts[-1], ("https://example.org/api/v1/devices/wnb_1/settings",
+                                          {"alertsPausedUntil": "2099-01-01T00:00:00Z"}, "wn_KEY"))
+        self.assertIs(self.app.info()["alerts"]["sent"], True)
+        self.app.configure({"alertsPausedUntil": None})        # turn alerts back on
+        self.assertTrue(self.app.sync_settings())
+        self.assertEqual(self.posts[-1][1], {"alertsPausedUntil": None})
+        self.assertEqual(self.app.info()["alerts"]["paused"], False)
+
+    def test_pause_normalised_to_utc(self):
+        future = time.strftime("%Y", time.gmtime(time.time() + 400 * 86400))
+        self.reply = OSError("offline")
+        self.app.configure({"alertsPausedUntil": f"{future}-06-01T05:30:00.123+05:30"})
+        pending = json.loads(Path(self.app.pending_settings_path()).read_text())
+        self.assertEqual(pending, {"alertsPausedUntil": f"{future}-06-01T00:00:00Z"})
+        self.assertIs(self.app.info()["alerts"]["forever"], False)
+
+    def test_pause_sent_together_with_test_and_newest_wins(self):
+        self.reply = OSError("offline")
+        self.app.configure({"test": True, "alertsPausedUntil": "2099-01-01T00:00:00Z"})
+        self.app.configure({"alertsPausedUntil": None})
+        self.reply = (200, {"ok": True})
+        self.assertTrue(self.app.sync_settings())
+        self.assertEqual(self.posts[-1][1], {"test": True, "alertsPausedUntil": None})
+
+    def test_pause_bad_values(self):
+        for v in ("tomorrow", "2020-01-01T00:00:00Z", "2099-01-01T00:00:00", 5, True):
+            with self.assertRaises(wnbase.ApiError, msg=v):
+                self.app.configure({"alertsPausedUntil": v})
+        self.assertFalse(os.path.exists(self.app.pending_settings_path()))
+        for text in ("Pause the emails about it", "Pause for 1 day", "Pause for 1 week", "Pause for 1 month",
+                     "Pause until I turn them back on", "Turn alerts back on", "2099-01-01T00:00:00Z"):
+            self.assertIn(text, wnbase.DASHBOARD)
+
+
 class Health(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
