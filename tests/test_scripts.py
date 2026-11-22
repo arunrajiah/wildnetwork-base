@@ -76,8 +76,24 @@ class Image(unittest.TestCase):
             self.assertTrue((ROOT / "base" / f).is_file(), f)
         self.assertIn("mic.py", line)
         build = (ROOT / "image" / "build.sh").read_text()
-        self.assertIn('cp -R "$ROOT/base" "$ROOT/systemd" "$ROOT/install.sh"', build)
+        self.assertIn('cp -R "$ROOT/base" "$ROOT/systemd" "$ROOT/apt" "$ROOT/install.sh"', build)
+        # Every apt/ file provision.sh installs exists (the whole folder goes into the image and the update package).
+        import re
+        for f in re.findall(r'"\$SRC/apt/([^"]+)"', prov):
+            self.assertTrue((ROOT / "apt" / f).is_file(), f)
         self.assertIn("sha256sum", build)
+
+    def test_security_updates_only(self):
+        conf = (ROOT / "apt" / "52wnbase-unattended-upgrades").read_text()
+        self.assertIn("#clear Unattended-Upgrade::Origins-Pattern;", conf)
+        patterns = [l.strip() for l in conf.splitlines() if l.strip().startswith('"origin=')]
+        self.assertTrue(patterns)
+        self.assertTrue(all("label=Debian-Security" in p for p in patterns), patterns)
+        prov = (ROOT / "base" / "provision.sh").read_text()
+        # Installed in every mode (not inside the "not --update" block), and never fatal during an update.
+        section = prov.split("# --- operating system security updates", 1)[1].split("# --- services", 1)[0]
+        self.assertIn('if [ "$MODE" = --update ]', section)  # handles self-updating Bases, so it runs in every mode
+        self.assertIn("|| warn", prov)
 
     def test_release_attaches_checksum(self):
         wf = (ROOT / ".github" / "workflows" / "image.yml").read_text()
