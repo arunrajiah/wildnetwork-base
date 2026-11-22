@@ -1,0 +1,16 @@
+// Wildlife Network Base: install Debian security updates by themselves, nothing else.
+// Installed by base/provision.sh. Feature updates, the Raspberry Pi kernel and firmware, Docker images and
+// BirdNET-Go are not touched here (the Base software updates itself separately, wnupdate.py).
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+};
+// Restart only when an update needs it (for example the C library), early in the morning.
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "05:30";
+// Install in small steps, so a power cut in the middle leaves a working system.
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "false";

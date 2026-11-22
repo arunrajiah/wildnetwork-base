@@ -31,7 +31,7 @@ done
 # Our stage, with the files it installs. Only stage-wildnetwork is exported as an image.
 cp -R "$HERE/stage-wildnetwork" "$STAGE"
 mkdir -p "$STAGE/00-wildnetwork/files/src" "$STAGE/01-birdnet-go/files"
-cp -R "$ROOT/base" "$ROOT/systemd" "$ROOT/install.sh" "$ROOT/LICENSE" "$STAGE/00-wildnetwork/files/src/"
+cp -R "$ROOT/base" "$ROOT/systemd" "$ROOT/apt" "$ROOT/install.sh" "$ROOT/LICENSE" "$STAGE/00-wildnetwork/files/src/"
 cp "$HERE/VERSIONS" "$STAGE/01-birdnet-go/files/VERSIONS"
 touch "$PIGEN/stage2/SKIP_IMAGES"
 

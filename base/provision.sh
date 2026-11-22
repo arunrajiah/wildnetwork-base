@@ -137,6 +137,26 @@ if [ "$MODE" = --live ]; then
 fi
 fi
 
+# --- operating system security updates (every mode, so Bases that update themselves get it too) ---------------
+# Debian security updates only (apt/52wnbase-unattended-upgrades); a restart only when an update needs one, at 05:30.
+if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  if [ "$MODE" = --update ]; then
+    # An update must never fail because of this: without internet or with apt busy, the next update tries again.
+    timeout 600 apt-get -o DPkg::Lock::Timeout=120 update -qq >/dev/null 2>&1 || true
+    timeout 600 apt-get -o DPkg::Lock::Timeout=120 install -y -qq --no-install-recommends unattended-upgrades >/dev/null 2>&1 \
+      || warn "Could not install unattended-upgrades now; the next update tries again."
+  else
+    apt-get install -y -qq --no-install-recommends unattended-upgrades >/dev/null
+  fi
+fi
+if dpkg -s unattended-upgrades >/dev/null 2>&1; then
+  install -m 644 "$SRC/apt/52wnbase-unattended-upgrades" /etc/apt/apt.conf.d/52wnbase-unattended-upgrades
+  install -m 644 "$SRC/apt/20wnbase-auto-upgrades" /etc/apt/apt.conf.d/20wnbase-auto-upgrades
+  systemctl enable apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+  [ "$MODE" = --image ] || systemctl start apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+fi
+
 # --- services ------------------------------------------------------------------------------------------------
 # The hotspot used to be started by wn-hotspot.service and a timer, and its profile connected by itself, so after a
 # power cut it could take the radio before home Wi-Fi had finished scanning. wn-net.service decides now.
