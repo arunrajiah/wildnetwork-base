@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import configparser
 import hashlib
 import hmac
@@ -65,6 +66,7 @@ REGISTER_MAX_BACKOFF = 3600
 HEALTH_EVERY = 900          # seconds between health reports to Wildlife Network
 HEALTH_QUEUE_MAX = 96       # reports kept while offline (one day); older ones are dropped
 MIC_CHECK_EVERY = 60        # seconds the microphone check is cached
+NETWORK_CACHE = 10          # seconds network() is reused: the dashboard asks for info and status together
 ALERTS_FOREVER = "2099-01-01T00:00:00Z"   # "until I turn them back on"
 TZ_FILE = "wildnetwork-timezone.txt"
 TZ_AUTO = ("", "auto", "automatic", "location")
@@ -383,6 +385,7 @@ class App:
         self.fails: dict[str, deque] = defaultdict(deque)
         self._bng: tuple[float, str | None] | None = None
         self._mic: tuple[float, dict] | None = None
+        self._net: tuple[float, dict] | None = None
 
     # --- helpers -----------------------------------------------------------------------------------------
 
@@ -1102,6 +1105,7 @@ class App:
         threading.Thread(target=loop, name="registration", daemon=True).start()
 
     def configure(self, body: dict) -> dict:
+        self._net = None   # Wi-Fi or 4G settings may change: read the network afresh
         allowed = {"name", "latitude", "longitude", "roundCoords", "apiKey", "deviceId", "endpoint", "apn", "wifi", "test",
                    "timezone", "autoUpdate", "alertsPausedUntil"}
         unknown = set(body) - allowed
@@ -1282,6 +1286,10 @@ class App:
         return None
 
     def network(self) -> dict:
+        # nmcli and mmcli are separate processes; info, status and the health report each ask, often together.
+        c = self._net
+        if c and time.monotonic() - c[0] < NETWORK_CACHE:
+            return copy.deepcopy(c[1])
         net: dict = {}
         rc, out = self.run(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], 15)
         if rc == 0:
@@ -1312,6 +1320,7 @@ class App:
                 if kv.get(key) and kv[key] != "--":
                     cell[name] = kv[key]
             net["cellular"] = cell
+        self._net = (time.monotonic(), copy.deepcopy(net))
         return net
 
     def status(self) -> dict:
@@ -1582,7 +1591,8 @@ $('geo').onclick=()=>{const g=$('geomsg');
 if(!navigator.geolocation){g.textContent='This browser cannot share its location here. Type the coordinates instead (from a map app).';return}
 g.textContent='Finding location...';navigator.geolocation.getCurrentPosition(p=>{$('f-lat').value=p.coords.latitude.toFixed(5);$('f-lon').value=p.coords.longitude.toFixed(5);g.textContent='Location filled in.'},
 e=>{g.textContent='Could not get the location'+(window.isSecureContext?'':' (many browsers only share it on secure pages)')+'. Type the coordinates instead, for example from a map app.'},{enableHighAccuracy:true,timeout:20000})};
-refresh();setInterval(refresh,30000);
+refresh();setInterval(()=>{if(!document.hidden)refresh()},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 </script></body></html>
 """
 DASHBOARD = DASHBOARD.replace("%%LOGO%%", LOGO_SVG).replace("%%FOREVER%%", ALERTS_FOREVER).replace(
